@@ -32,7 +32,7 @@ def main() -> None:
     args = parser.parse_args()
 
     run(
-        model_name=args.model,
+        model=args.model,
         score_month=args.score_month,
         model_version=args.model_version,
         layers=args.layers,
