@@ -1,0 +1,223 @@
+model:
+  name: lfs
+  display_name: "Loss Forecast Suite"
+  hooks_module: models.lfs.hooks
+
+source:
+  database: analytics
+  table: lfs_scored_accounts
+  score_month_col: month
+  key_cols:
+    - creditaccountid
+    - customerid
+  score_col: lfs_score
+  channel_col: channel
+  channels:
+    - digital
+    - directmail
+
+  columns:
+    features:
+      - feature_01
+      - feature_02
+      - feature_03
+      - feature_04
+      - feature_05
+      - feature_06
+      - feature_07
+      - feature_08
+      - feature_09
+      - feature_10
+      - feature_11
+    business:
+      - source
+      - line
+      - active
+      - saleamount
+      - salecount
+      - mob_pti
+      - endingreceivable
+
+binning:
+  dynamic:
+    score:
+      n_bins: 10
+      partition_cols:
+        - month
+        - channel
+      output_col_decile: lfs_decile_dyn
+      output_col_band: lfs_band_dyn
+    bands:
+      - name: "Low"
+        deciles: [1, 2, 3]
+      - name: "Medium"
+        deciles: [4, 5, 6, 7]
+      - name: "High"
+        deciles: [8, 9, 10]
+  static:
+    score:
+      baseline_window:
+        - "2024-08"
+        - "2025-02"
+      partition_cols:
+        - channel
+      n_bins: 10
+      output_col: lfs_decile_static
+
+  buckets:
+    receivable_bucket:
+      column: endingreceivable
+      boundaries: [0, 500, 1000, 2500, 5000, 10000]
+      labels: ["0-500", "500-1K", "1K-2.5K", "2.5K-5K", "5K-10K", "10K+"]
+    saleamount_bucket:
+      column: saleamount
+      boundaries: [0, 100, 500, 1000, 5000]
+      labels: ["0-100", "100-500", "500-1K", "1K-5K", "5K+"]
+    salecount_bucket:
+      column: salecount
+      boundaries: [0, 1, 5, 10, 25]
+      labels: ["0-1", "1-5", "5-10", "10-25", "25+"]
+    mob_pti_bucket:
+      column: mob_pti
+      boundaries: [0, 6, 12, 24, 36]
+      labels: ["0-6", "6-12", "12-24", "24-36", "36+"]
+
+layer1:
+  output_table: lfs_layer1_account
+  extra_columns:
+    - name: dq_missing_flag
+      expr: "CASE WHEN lfs_score IS NULL THEN 1 ELSE 0 END"
+    - name: dq_outlier_flag
+      expr: "CASE WHEN lfs_score < 0 OR lfs_score > 1 THEN 1 ELSE 0 END"
+
+layer2:
+  # ── Standard business summary tables ──────────────────────────────
+  # Core aggregations consumed by business stakeholders for trend
+  # analysis and channel-level performance review.
+  standard_tables:
+    overall_summary:
+      output_table: lfs_layer2_overall_summary
+      group_by: [vintage_month, channel]
+      metrics: &standard_metrics
+        - {func: count, alias: account_count}
+        - {func: avg, col: lfs_score, alias: avg_lfs_score}
+        - {func: sum, col: lfs_score, alias: sum_lfs_score}
+        - {func: sum, col: endingreceivable, alias: total_endingreceivable}
+        - {func: avg, col: endingreceivable, alias: avg_endingreceivable}
+        - {func: sum, col: saleamount, alias: total_saleamount}
+        - {func: avg, col: saleamount, alias: avg_saleamount}
+        - {func: sum, col: salecount, alias: total_salecount}
+        - {func: avg, col: salecount, alias: avg_salecount}
+    score_distribution:
+      output_table: lfs_layer2_score_distribution
+      group_by: [vintage_month, channel, lfs_decile_dyn]
+      metrics:
+        - {func: count, alias: account_count}
+        - {func: avg, col: lfs_score, alias: avg_lfs_score}
+        - {func: sum, col: lfs_score, alias: sum_lfs_score}
+      extra_columns:
+        - name: pct_of_channel_vintage_accounts
+          over: [vintage_month, channel]
+          source: account_count
+    by_source:
+      output_table: lfs_layer2_by_source
+      group_by: [vintage_month, channel, source]
+      metrics: *standard_metrics
+    by_line:
+      output_table: lfs_layer2_by_line
+      group_by: [vintage_month, channel, line]
+      metrics: *standard_metrics
+
+  # ── Optional driver slice tables ──────────────────────────────────
+  # Drill-down views that cross-tabulate score metrics by business
+  # buckets.  These are optional — remove entries to skip production.
+  driver_tables:
+    by_receivable_bucket:
+      output_table: lfs_layer2_by_receivable_bucket
+      group_by: [vintage_month, channel, receivable_bucket]
+      metrics: *standard_metrics
+    by_saleamount_bucket:
+      output_table: lfs_layer2_by_saleamount_bucket
+      group_by: [vintage_month, channel, saleamount_bucket]
+      metrics: *standard_metrics
+    by_salecount_bucket:
+      output_table: lfs_layer2_by_salecount_bucket
+      group_by: [vintage_month, channel, salecount_bucket]
+      metrics: *standard_metrics
+    by_mob_pti_bucket:
+      output_table: lfs_layer2_by_mob_pti_bucket
+      group_by: [vintage_month, channel, mob_pti_bucket]
+      metrics: *standard_metrics
+
+layer3:
+  channel_col: channel
+  baseline_window:
+    - "2024-08"
+    - "2025-02"
+  score_col: lfs_score
+
+  # Feature list shared across multiple L3 tables.
+  feature_columns: &feature_columns
+    - feature_01
+    - feature_02
+    - feature_03
+    - feature_04
+    - feature_05
+    - feature_06
+    - feature_07
+    - feature_08
+    - feature_09
+    - feature_10
+    - feature_11
+
+  tables:
+    score_drift:
+      output_table: lfs_layer3_score_drift
+      psi_n_bins: 10
+      quantiles: [0.50, 0.80, 0.90, 0.95]
+      top_pct_means: [0.10, 0.05]
+      # Baseline threshold quantiles to measure tail concentration shift.
+      baseline_threshold_quantiles: [0.90, 0.95]
+
+    feature_psi:
+      output_table: lfs_layer3_feature_psi
+      n_bins: 10
+      columns: *feature_columns
+
+    data_quality:
+      output_table: lfs_layer3_data_quality
+      # Score outlier bounds are fixed (probability range).
+      score_outlier_bounds:
+        lower: 0.0
+        upper: 1.0
+
+    feature_quality:
+      output_table: lfs_layer3_feature_quality
+      columns: *feature_columns
+      # Feature outlier bounds are derived from baseline p1/p99 per
+      # feature × channel — no fixed bounds needed in config.
+      outlier_quantiles: [0.01, 0.99]
+
+    feature_score_relationship:
+      output_table: lfs_layer3_feature_score_relationship
+      columns: *feature_columns
+
+    population_mix:
+      output_table: lfs_layer3_population_mix
+      segments:
+        - column: source
+          segment_type: source
+        - column: line
+          segment_type: line
+        - column: receivable_bucket
+          segment_type: receivable_bucket
+        - column: saleamount_bucket
+          segment_type: saleamount_bucket
+
+output:
+  database: reporting
+  format: parquet
+  mode: overwrite
+  partition_cols:
+    - score_month
+    - model_version
