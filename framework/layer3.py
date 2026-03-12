@@ -598,7 +598,8 @@ def _build_population_mix(
                 # Cast segment column to string for consistent output type,
                 # then group and count.
                 seg_df = ch_df.withColumn(
-                    "_seg_val", F.col(seg_col).cast("string")
+                    "_seg_val",
+                    F.coalesce(F.col(seg_col).cast("string"), F.lit("Unknown")),
                 )
                 seg_counts = (
                     seg_df.groupBy("_seg_val")
