@@ -52,6 +52,7 @@ def build_layer3(
     current_df: DataFrame,
     baseline_df: DataFrame,
     config: ModelConfig,
+    actuals_df: DataFrame | None = None,
 ) -> dict[str, DataFrame]:
     """Build all Layer 3 monitoring tables.
 
@@ -60,6 +61,9 @@ def build_layer3(
         baseline_df: Raw source data for the baseline window (pre-
             enrichment — only needs the score and feature columns).
         config: Model configuration.
+        actuals_df: Optional actuals DataFrame with columns
+            (creditaccountid, vintage_month, is_bad, edr30, edr60, edr90).
+            Required to produce the performance and calibration tables.
 
     Returns:
         ``{output_table_name: DataFrame}``
@@ -163,6 +167,33 @@ def build_layer3(
             segments=cfg["segments"],
             channel_col=channel_col,
             channels=channels,
+        )
+        results[output_table] = df
+
+    # ── performance ──────────────────────────────────────────────────
+    if "performance" in tables_cfg and actuals_df is not None:
+        cfg = tables_cfg["performance"]
+        output_table = cfg["output_table"]
+        logger.info("Building %s", output_table)
+        df = _build_performance(
+            current_df, actuals_df, spark,
+            score_col=score_col,
+            channel_col=channel_col,
+            channels=channels,
+        )
+        results[output_table] = df
+
+    # ── calibration ──────────────────────────────────────────────────
+    if "calibration" in tables_cfg and actuals_df is not None:
+        cfg = tables_cfg["calibration"]
+        output_table = cfg["output_table"]
+        logger.info("Building %s", output_table)
+        df = _build_calibration(
+            current_df, actuals_df, spark,
+            score_col=score_col,
+            channel_col=channel_col,
+            channels=channels,
+            score_bin_col=cfg.get("score_bin_col", "lfs_decile_static"),
         )
         results[output_table] = df
 
@@ -633,6 +664,88 @@ def _build_population_mix(
         return spark.createDataFrame([], schema)
 
     return spark.createDataFrame(rows)
+
+
+def _build_performance(
+    current_df: DataFrame,
+    actuals_df: DataFrame,
+    spark: SparkSession,
+    *,
+    score_col: str,
+    channel_col: str,
+    channels: list[str],
+) -> DataFrame:
+    """Performance monitoring table: one row per (vintage_month, channel).
+
+    Joins enriched Layer 1 output with an actuals DataFrame on
+    (creditaccountid, vintage_month) and aggregates bad rates and EDR metrics.
+
+    Actuals schema expected: creditaccountid, vintage_month, is_bad INT,
+    edr30 INT, edr60 INT, edr90 INT.
+    """
+    actuals_slim = actuals_df.select(
+        "creditaccountid", "vintage_month",
+        "is_bad", "edr30", "edr60", "edr90",
+    )
+    joined = current_df.join(
+        actuals_slim, on=["creditaccountid", "vintage_month"], how="left",
+    )
+    return (
+        joined
+        .groupBy("vintage_month", channel_col)
+        .agg(
+            F.count("*").alias("account_count"),
+            F.avg(score_col).alias("avg_lfs_score"),
+            F.avg("is_bad").alias("actual_bad_rate"),
+            F.avg("edr30").alias("edr30"),
+            F.avg("edr60").alias("edr60"),
+            F.avg("edr90").alias("edr90"),
+        )
+        .withColumn("predicted_bad_rate", F.col("avg_lfs_score"))
+        .withColumn(
+            "calibration_gap",
+            F.col("actual_bad_rate") - F.col("avg_lfs_score"),
+        )
+        .orderBy("vintage_month", channel_col)
+    )
+
+
+def _build_calibration(
+    current_df: DataFrame,
+    actuals_df: DataFrame,
+    spark: SparkSession,
+    *,
+    score_col: str,
+    channel_col: str,
+    channels: list[str],
+    score_bin_col: str = "lfs_decile_static",
+) -> DataFrame:
+    """Calibration table: one row per (vintage_month, channel, score_bin).
+
+    Aggregates predicted rate (avg lfs_score) vs actual bad rate per static
+    score decile bin.  The calibration_gap = actual_rate − predicted_rate.
+    """
+    actuals_slim = actuals_df.select(
+        "creditaccountid", "vintage_month", "is_bad",
+    )
+    joined = current_df.join(
+        actuals_slim, on=["creditaccountid", "vintage_month"], how="left",
+    )
+    return (
+        joined
+        .groupBy("vintage_month", channel_col, score_bin_col)
+        .agg(
+            F.count("*").alias("account_count"),
+            F.avg(score_col).alias("predicted_rate"),
+            F.avg("is_bad").alias("actual_rate"),
+        )
+        .withColumn(
+            "calibration_gap",
+            F.col("actual_rate") - F.col("predicted_rate"),
+        )
+        .withColumnRenamed(score_bin_col, "score_bin")
+        .orderBy("vintage_month", channel_col, "score_bin")
+    )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

@@ -214,6 +214,13 @@ layer3:
         - column: saleamount_bucket
           segment_type: saleamount_bucket
 
+    performance:
+      output_table: lfs_layer3_performance
+
+    calibration:
+      output_table: lfs_layer3_calibration
+      score_bin_col: lfs_decile_static
+
 output:
   database: reporting
   format: parquet

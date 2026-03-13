@@ -190,46 +190,69 @@ def _sec_metadata(
 def _sec_executive(
     drift_rows: list,
     feat_psi_rows: list,
+    pop_mix_rows: list,
+    perf_rows: list,
+    calib_rows: list,
     channels: list[str],
 ) -> list[str]:
-    """Executive summary: score health table + top drifting features."""
+    """Management-style executive summary: health, risks, drivers, observations."""
     lines = ["## B. Executive Summary", ""]
 
-    # ── Score health table ────────────────────────────────────────────
-    lines += ["### Score Health", ""]
-    if drift_rows:
-        h = ["Channel", "Avg Score", "Std", "PSI vs Baseline", "KS vs Baseline",
-             "% Above Baseline P90", "% Above Baseline P95"]
-        tbl_rows = []
-        for r in sorted(drift_rows, key=lambda x: x["channel"]):
-            tbl_rows.append([
-                r["channel"],
-                _f(r.get("mean_lfs_score")),
-                _f(r.get("std_lfs_score")),
-                _psi_cell(r.get("score_psi")),
-                _ks_cell(r.get("score_ks")),
-                _tail_cell(r.get("pct_accounts_above_p90_baseline")),
-                _tail_cell(r.get("pct_accounts_above_p95_baseline")),
-            ])
+    health = _health_status(drift_rows, feat_psi_rows, perf_rows, calib_rows)
+
+    # ── B1. Overall model health ──────────────────────────────────────
+    lines += ["### Model Health", ""]
+    h = ["Channel", "Avg Score", "PSI", "KS", "Health"]
+    tbl_rows = []
+    for r in sorted(drift_rows, key=lambda x: x.get("channel", "")):
+        psi_v = float(r.get("score_psi") or 0)
+        row_health = (
+            "**[ALERT]**"   if psi_v >= _PSI_ALERT else
+            "**[WARN]**"    if psi_v >= _PSI_WARN  else
+            "STABLE"
+        )
+        tbl_rows.append([
+            r.get("channel", "—"),
+            _f(r.get("mean_lfs_score")),
+            _psi_cell(r.get("score_psi")),
+            _ks_cell(r.get("score_ks")),
+            row_health,
+        ])
+    if tbl_rows:
+        lines += [_tbl(h, tbl_rows), ""]
+    lines += [f"**Overall model health: {health}**", ""]
+
+    # ── B2. Performance snapshot (if actuals available) ───────────────
+    if perf_rows:
+        lines += ["### Performance Snapshot", ""]
+        h = ["Channel", "Predicted Bad Rate", "Actual Bad Rate", "Gap", "EDR90"]
+        tbl_rows = [
+            [
+                r.get("channel", "—"),
+                _pct(r.get("predicted_bad_rate"), 2),
+                _pct(r.get("actual_bad_rate"), 2),
+                _shift(r.get("predicted_bad_rate"), r.get("actual_bad_rate")),
+                _pct(r.get("edr90"), 2),
+            ]
+            for r in sorted(perf_rows, key=lambda x: x.get("channel", ""))
+        ]
         lines += [_tbl(h, tbl_rows), ""]
     else:
-        lines += ["_Score drift data not available._", ""]
+        lines += ["*Performance monitoring: actuals not available for this vintage.*", ""]
 
-    # ── Top drifting features ─────────────────────────────────────────
-    lines += ["### Top Drifting Features (by PSI)", ""]
+    # ── B3. Top drifting features ─────────────────────────────────────
+    lines += ["### Top Drifting Features", ""]
     if feat_psi_rows:
-        # Aggregate max PSI across channels per feature.
         feat_max: dict[str, tuple[float, float, float]] = {}
         for r in feat_psi_rows:
             fn = r["feature_name"]
-            p = float(r["psi"]) if r["psi"] is not None else 0.0
-            bm = float(r["baseline_mean"]) if r["baseline_mean"] is not None else 0.0
-            cm = float(r["current_mean"]) if r["current_mean"] is not None else 0.0
+            p  = float(r.get("psi") or 0)
+            bm = float(r.get("baseline_mean") or 0)
+            cm = float(r.get("current_mean") or 0)
             if fn not in feat_max or p > feat_max[fn][0]:
                 feat_max[fn] = (p, bm, cm)
-
         top5 = sorted(feat_max.items(), key=lambda x: -x[1][0])[:5]
-        h = ["Rank", "Feature", "Max PSI (across channels)", "Baseline Mean", "Current Mean", "Mean Shift"]
+        h = ["Rank", "Feature", "Max PSI", "Baseline Mean", "Current Mean", "Shift"]
         tbl_rows = [
             [i + 1, fn, _psi_cell(psi), _f(bm), _f(cm), _shift(bm, cm)]
             for i, (fn, (psi, bm, cm)) in enumerate(top5)
@@ -237,6 +260,15 @@ def _sec_executive(
         lines += [_tbl(h, tbl_rows), ""]
     else:
         lines += ["_Feature PSI data not available._", ""]
+
+    # ── B4. Key drivers (text) ────────────────────────────────────────
+    lines += ["### Key Drivers & Observations", ""]
+    diagnosis = _collect_diagnosis(
+        drift_rows, feat_psi_rows, [], pop_mix_rows, perf_rows, calib_rows
+    )
+    for d in diagnosis:
+        lines += [f"- {d}"]
+    lines += [""]
 
     return lines
 
@@ -333,6 +365,8 @@ def _sec_monitoring(
     corr_rows: list,
     pop_mix_rows: list,
     dq_rows: list,
+    perf_rows: list | None = None,
+    calib_rows: list | None = None,
 ) -> list[str]:
     lines = ["## D. Monitoring Summary", ""]
 
@@ -439,17 +473,116 @@ def _sec_monitoring(
     else:
         lines += ["_Data quality data not available._", ""]
 
+    # ── D6. Performance monitoring ────────────────────────────────────
+    lines += [f"### D6. Performance Monitoring ({vm})", ""]
+    if perf_rows:
+        h = ["Channel", "Accounts", "Avg Score", "Predicted Bad Rate",
+             "Actual Bad Rate", "Gap", "EDR30", "EDR60", "EDR90"]
+        tbl_rows = [
+            [
+                r.get("channel", "—"),
+                _n(r.get("account_count")),
+                _f(r.get("avg_lfs_score")),
+                _pct(r.get("predicted_bad_rate"), 2),
+                _pct(r.get("actual_bad_rate"), 2),
+                _shift(r.get("predicted_bad_rate"), r.get("actual_bad_rate")),
+                _pct(r.get("edr30"), 2),
+                _pct(r.get("edr60"), 2),
+                _pct(r.get("edr90"), 2),
+            ]
+            for r in sorted(perf_rows, key=lambda x: x.get("channel", ""))
+        ]
+        lines += [_tbl(h, tbl_rows), ""]
+    else:
+        lines += ["_Performance monitoring not available — actuals not provided._", ""]
+
+    # ── D7. Calibration ───────────────────────────────────────────────
+    lines += [f"### D7. Calibration ({vm})", ""]
+    if calib_rows:
+        latest = [r for r in calib_rows if r.get("vintage_month") == vm]
+        if not latest:
+            latest = calib_rows
+        h = ["Channel", "Score Decile", "Accounts", "Predicted Rate", "Actual Rate", "Gap"]
+        tbl_rows = [
+            [
+                r.get("channel", "—"),
+                r.get("score_bin", "—"),
+                _n(r.get("account_count")),
+                _pct(r.get("predicted_rate"), 2),
+                _pct(r.get("actual_rate"), 2),
+                _shift(r.get("predicted_rate"), r.get("actual_rate")),
+            ]
+            for r in sorted(
+                latest,
+                key=lambda x: (x.get("channel", ""), int(x.get("score_bin") or 0)),
+            )
+        ]
+        lines += [_tbl(h, tbl_rows), ""]
+    else:
+        lines += ["_Calibration not available — actuals not provided._", ""]
+
     return lines
 
 
 def _sec_flags(flags: list[str]) -> list[str]:
-    lines = ["## E. Flags and Observations", ""]
+    lines = ["### Flags and Observations", ""]
     if not flags:
         lines += ["No threshold violations detected for this score month.", ""]
     else:
         lines += [f"- {f}" for f in flags]
         lines += [""]
     return lines
+
+
+def _sec_diagnosis(observations: list[str]) -> list[str]:
+    """Automated diagnosis section with human-readable explanations."""
+    lines = ["### Automated Diagnosis", ""]
+    if not observations:
+        lines += ["No significant issues detected.", ""]
+    else:
+        for obs in observations:
+            lines += [f"- {obs}"]
+        lines += [""]
+    return lines
+
+
+def _sec_charts_md() -> list[str]:
+    """Markdown placeholder for the charts section."""
+    return [
+        "## E. Charts",
+        "",
+        "*Charts are embedded in the HTML version of this report.*",
+        "*Install matplotlib and re-generate to include visual output: `pip install matplotlib`*",
+        "",
+    ]
+
+
+_CHART_LABELS: dict[str, str] = {
+    "score_drift_trend": "Score Drift Trend by Channel",
+    "feature_psi_bar":   "Feature PSI — Top Drifting Features",
+    "calibration":       "Calibration: Predicted vs Actual Bad Rate",
+    "population_mix":    "Population Mix — Acquisition Source",
+}
+
+
+def _build_charts_html(charts: dict[str, str]) -> str:
+    """Build the HTML block for embedded charts."""
+    if not charts:
+        return (
+            "<p><em>No charts available — install matplotlib: "
+            "<code>pip install matplotlib</code></em></p>"
+        )
+    parts = ['<div class="charts-grid">']
+    for name, b64 in charts.items():
+        label = _CHART_LABELS.get(name, name.replace("_", " ").title())
+        parts.append(
+            f'<div class="chart-item">'
+            f'<p class="chart-label">{label}</p>'
+            f'<img src="data:image/png;base64,{b64}" alt="{label}">'
+            f'</div>'
+        )
+    parts.append("</div>")
+    return "\n".join(parts)
 
 
 def _collect_flags(
@@ -522,6 +655,142 @@ def _collect_flags(
         )
 
     return flags
+
+
+# ── Diagnosis helpers ─────────────────────────────────────────────────
+
+_HEALTH_ALERT   = "**[ALERT]**"
+_HEALTH_WARNING = "**[WARNING]**"
+_HEALTH_STABLE  = "**[STABLE]**"
+
+
+def _health_status(
+    drift_rows: list,
+    feat_psi_rows: list,
+    perf_rows: list,
+    calib_rows: list,
+) -> str:
+    """Return one of _HEALTH_ALERT / _HEALTH_WARNING / _HEALTH_STABLE."""
+    max_score_psi = max((float(r.get("score_psi") or 0) for r in drift_rows), default=0)
+    max_feat_psi  = max((float(r.get("psi") or 0) for r in feat_psi_rows), default=0)
+    max_calib_gap = max(
+        (abs(float(r.get("calibration_gap") or 0)) for r in calib_rows), default=0
+    )
+    if max_score_psi >= _PSI_ALERT or max_feat_psi >= _PSI_ALERT:
+        return _HEALTH_ALERT
+    if (max_score_psi >= _PSI_WARN or max_feat_psi >= _PSI_WARN
+            or max_calib_gap > 0.05):
+        return _HEALTH_WARNING
+    return _HEALTH_STABLE
+
+
+def _collect_diagnosis(
+    drift_rows: list,
+    feat_psi_rows: list,
+    dq_rows: list,
+    pop_mix_rows: list,
+    perf_rows: list,
+    calib_rows: list,
+) -> list[str]:
+    """Generate human-readable diagnostic statements from monitoring data."""
+    obs: list[str] = []
+
+    # ── Score drift ───────────────────────────────────────────────────
+    if drift_rows:
+        max_psi = max((float(r.get("score_psi") or 0) for r in drift_rows), default=0)
+        if max_psi >= _PSI_ALERT:
+            obs.append(
+                f"Score distribution has shifted significantly (max PSI = {_f(max_psi)}) "
+                "vs the baseline window. Investigate upstream feature or population changes."
+            )
+        elif max_psi >= _PSI_WARN:
+            obs.append(
+                f"Mild score drift detected (max PSI = {_f(max_psi)}). "
+                "Continue monitoring — no immediate action required."
+            )
+
+        for r in drift_rows:
+            p90 = float(r.get("pct_accounts_above_p90_baseline") or 0)
+            if p90 >= _TAIL_WARN:
+                obs.append(
+                    f"{r['channel']}: right-tail expansion — {_pct(p90)} of accounts "
+                    "exceed the baseline P90 threshold. Score distribution is shifting "
+                    "toward higher-risk predictions."
+                )
+
+    # ── Feature drift ─────────────────────────────────────────────────
+    if feat_psi_rows:
+        feat_max: dict[str, float] = {}
+        for r in feat_psi_rows:
+            fn = r["feature_name"]
+            p  = float(r.get("psi") or 0)
+            feat_max[fn] = max(feat_max.get(fn, 0.0), p)
+        flagged = sorted(
+            [(fn, p) for fn, p in feat_max.items() if p >= _PSI_WARN],
+            key=lambda x: -x[1],
+        )
+        if flagged:
+            top3 = ", ".join(f"{fn} (PSI={_f(p)})" for fn, p in flagged[:3])
+            obs.append(
+                f"Feature drift concentrated in: {top3}. "
+                "Review upstream data pipelines for these inputs."
+            )
+
+    # ── Population mix shift ──────────────────────────────────────────
+    if pop_mix_rows:
+        source_rows = [r for r in pop_mix_rows if r.get("segment_type") == "source"]
+        organic = [r for r in source_rows if r.get("segment_value") == "organic"]
+        if organic:
+            org_pct = max(float(r.get("pct_of_channel_accounts") or 0) for r in organic)
+            if org_pct < 0.35:
+                obs.append(
+                    f"Organic acquisition share is below 35% ({_pct(org_pct)}). "
+                    "Paid/referral mix is elevated — verify that score performs "
+                    "equally well across acquisition sources."
+                )
+
+    # ── Calibration ───────────────────────────────────────────────────
+    if calib_rows:
+        max_gap = max(
+            (abs(float(r.get("calibration_gap") or 0)) for r in calib_rows), default=0
+        )
+        if max_gap > 0.05:
+            obs.append(
+                f"Calibration gap of {_f(max_gap, 3)} detected in at least one score bin. "
+                "Predicted probabilities deviate from observed bad rates — "
+                "review the model recalibration schedule."
+            )
+
+    # ── Performance ───────────────────────────────────────────────────
+    if perf_rows:
+        for r in perf_rows:
+            ch  = r.get("channel", "")
+            gap = float(r.get("calibration_gap") or 0)
+            if abs(gap) > 0.03:
+                direction = "underestimating" if gap > 0 else "overestimating"
+                obs.append(
+                    f"{ch}: model is {direction} risk at the channel level "
+                    f"(predicted {_pct(r.get('predicted_bad_rate'))}, "
+                    f"actual {_pct(r.get('actual_bad_rate'))}, "
+                    f"gap = {_shift(r.get('predicted_bad_rate'), r.get('actual_bad_rate'))})."
+                )
+
+    # ── Data quality ─────────────────────────────────────────────────
+    for r in dq_rows:
+        mr = float(r.get("missing_score_rate") or 0)
+        if mr >= _MISSING_WARN:
+            obs.append(
+                f"{r['channel']}: score missing rate {_pct(mr, 2)} — "
+                "investigate upstream scoring process."
+            )
+
+    if not obs:
+        obs.append(
+            "No material issues detected for this vintage. "
+            "Model appears stable across all monitored dimensions."
+        )
+
+    return obs
 
 
 # ── HTML / PDF export ────────────────────────────────────────────────
@@ -625,6 +894,35 @@ hr {
     padding-top: 12pt;
 }
 
+/* ── Charts ──────────────────────────────────────────────────────── */
+.charts-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin: 14px 0 22px;
+}
+.chart-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 12px 14px;
+    background: #fafafa;
+}
+.chart-label {
+    font-size: 9.5pt;
+    font-weight: 600;
+    color: #2c5282;
+    margin-bottom: 6px !important;
+}
+.chart-item img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+/* ── Health badges ───────────────────────────────────────────────── */
+.health-stable  { color: #276749; font-weight: 700; }
+.health-warning { color: #b7791f; font-weight: 700; }
+.health-alert   { color: #c53030; font-weight: 700; }
+
 /* ── Print / @page ───────────────────────────────────────────────── */
 @media print {
     body { max-width: 100%; padding: 0; }
@@ -640,7 +938,7 @@ hr {
 _PAGE_BREAK_H2 = frozenset(["B.", "C.", "D."])
 
 
-def _md_to_html(md_text: str, title: str = "Model Report") -> str:
+def _md_to_html(md_text: str, title: str = "Model Report", charts: dict[str, str] | None = None) -> str:
     """Convert *md_text* to a self-contained HTML document with embedded CSS.
 
     Requires either the ``markdown`` or ``markdown2`` package::
@@ -675,6 +973,15 @@ def _md_to_html(md_text: str, title: str = "Model Report") -> str:
         return m.group(0)
 
     body_html = re.sub(r"<h2>(.*?)</h2>", _maybe_break, body_html, flags=re.DOTALL)
+
+    # Inject chart images into the E. Charts section.
+    if charts is not None:
+        charts_html = _build_charts_html(charts)
+        body_html = body_html.replace(
+            "<h2>E. Charts</h2>",
+            f"<h2>E. Charts</h2>\n{charts_html}",
+            1,
+        )
 
     return (
         '<!DOCTYPE html>\n'
@@ -755,6 +1062,8 @@ def build_report(
     dq_name       = l3_tbls.get("data_quality", {}).get("output_table", "")
     corr_name     = l3_tbls.get("feature_score_relationship", {}).get("output_table", "")
     pop_name      = l3_tbls.get("population_mix", {}).get("output_table", "")
+    perf_name     = l3_tbls.get("performance", {}).get("output_table", "")
+    calib_name    = l3_tbls.get("calibration", {}).get("output_table", "")
 
     # ── Resolve effective vintage month ───────────────────────────────
     drift_df = _get(outputs, drift_name)
@@ -786,9 +1095,18 @@ def build_report(
     dq_rows       = _vm_rows(_get(outputs, dq_name), vm)
     corr_rows     = _vm_rows(_get(outputs, corr_name), vm)
     pop_mix_rows  = _vm_rows(_get(outputs, pop_name), vm)
+    perf_rows     = _vm_rows(_get(outputs, perf_name), vm) if perf_name else []
+    calib_rows    = (
+        [row.asDict() for row in _get(outputs, calib_name).collect()]
+        if calib_name and calib_name in outputs
+        else []
+    )
 
     # ── Collect flags ─────────────────────────────────────────────────
     flags = _collect_flags(drift_rows, feat_psi_rows, dq_rows, pop_mix_rows)
+    diagnosis = _collect_diagnosis(
+        drift_rows, feat_psi_rows, dq_rows, pop_mix_rows, perf_rows, calib_rows
+    )
 
     # ── Assemble sections ─────────────────────────────────────────────
     parts: list[str] = []
@@ -810,7 +1128,7 @@ def build_report(
 
     # Section B.
     channels = config.source.get("channels", [])
-    parts += _sec_executive(drift_rows, feat_psi_rows, channels)
+    parts += _sec_executive(drift_rows, feat_psi_rows, pop_mix_rows, perf_rows, calib_rows, channels)
     parts += ["---", ""]
 
     # Section C.
@@ -821,14 +1139,31 @@ def build_report(
     parts += ["---", ""]
 
     # Section D.
-    parts += _sec_monitoring(vm, drift_rows, feat_psi_rows, corr_rows, pop_mix_rows, dq_rows)
+    parts += _sec_monitoring(
+        vm, drift_rows, feat_psi_rows, corr_rows, pop_mix_rows, dq_rows,
+        perf_rows=perf_rows, calib_rows=calib_rows,
+    )
     parts += ["---", ""]
 
-    # Section E.
+    # Section E (charts placeholder in markdown).
+    parts += _sec_charts_md()
+    parts += ["---", ""]
+
+    # Section F.
+    parts += ["## F. Flags and Diagnosis", ""]
     parts += _sec_flags(flags)
+    parts += _sec_diagnosis(diagnosis)
     parts += ["---", "", f"*Report generated by the model_reporting framework · {config.name} · {model_version}*"]
 
     report = "\n".join(parts)
+
+    # ── Generate charts ───────────────────────────────────────────────
+    try:
+        from framework.charts import build_charts
+        charts = build_charts(outputs, config, vm)
+    except Exception as exc:
+        logger.warning("Chart generation failed: %s", exc)
+        charts = {}
 
     # ── Write to files ────────────────────────────────────────────────
     paths: dict[str, str | None] = {"md": None, "html": None}
@@ -848,7 +1183,7 @@ def build_report(
         # HTML — self-contained with embedded CSS.
         html_path = dest_dir / f"{stem}.html"
         try:
-            html_text = _md_to_html(report, title=f"{config.display_name} — {vm}")
+            html_text = _md_to_html(report, title=f"{config.display_name} — {vm}", charts=charts)
             html_path.write_text(html_text, encoding="utf-8")
             paths["html"] = str(html_path)
             logger.info("HTML report    -> %s", html_path)

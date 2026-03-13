@@ -1,6 +1,6 @@
 # Loss Forecast Suite — Reporting Run 2025-05
 
-> **Score month**: 2025-05 &nbsp;|&nbsp; **Model version**: v1.0 &nbsp;|&nbsp; **Generated**: 2026-03-13 21:48 UTC
+> **Score month**: 2025-05 &nbsp;|&nbsp; **Model version**: v1.0 &nbsp;|&nbsp; **Generated**: 2026-03-13 21:55 UTC
 
 ---
 
@@ -14,7 +14,7 @@
 | Baseline window | 2024-08 → 2025-02 |
 | Channels | digital, directmail |
 | Features monitored | 11 |
-| Generated | 2026-03-13 21:48 UTC |
+| Generated | 2026-03-13 21:55 UTC |
 | Layer 1 accounts (current) | 1,200 |
 
 ---

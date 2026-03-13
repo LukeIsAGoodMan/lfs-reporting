@@ -241,3 +241,60 @@ def generate_lfs_mock_data(
         f"({n_curr_months} months × 2 channels × {n_current_per_month_channel})"
     )
     return {"baseline_df": baseline_df, "current_df": current_df}
+
+
+def generate_lfs_mock_actuals(
+    spark: "SparkSession",
+    enriched_df: "DataFrame",
+    seed: int = 42,
+) -> "DataFrame":
+    """Generate synthetic actuals aligned with *enriched_df*.
+
+    For each account in *enriched_df* a binary outcome is drawn from a
+    sigmoid function of ``lfs_score`` so that higher scores correspond to
+    higher predicted-bad probability.  Three early-delinquency indicators
+    are also generated at different probability thresholds.
+
+    Sigmoid parameters used::
+
+        P(bad | score) = 1 / (1 + exp(-(score * 5 - 2.5)))
+        Score 0.30 → ~6%   bad rate
+        Score 0.50 → ~29%  bad rate
+        Score 0.70 → ~67%  bad rate
+
+    Args:
+        spark: Active SparkSession.
+        enriched_df: Layer 1 output (must contain creditaccountid,
+            vintage_month, lfs_score).
+        seed: Random seed passed to Spark's ``rand()`` function.
+
+    Returns:
+        DataFrame with columns: creditaccountid, vintage_month,
+        is_bad, edr30, edr60, edr90.
+    """
+    from pyspark.sql import functions as F
+
+    # Sigmoid: P(bad) = sigmoid(score * 5 - 2.5)
+    # EDR thresholds are slightly more lenient:
+    #   P(edr30) ≈ P(bad) * 1.5  (capped at 0.95)
+    #   P(edr60) ≈ P(bad) * 1.25
+
+    actuals = (
+        enriched_df
+        .select("creditaccountid", "vintage_month", "lfs_score")
+        .withColumn(
+            "_p_bad",
+            F.lit(1.0) / (F.lit(1.0) + F.exp(-(F.col("lfs_score") * F.lit(5.0) - F.lit(2.5)))),
+        )
+        .withColumn("_p_edr30", F.least(F.col("_p_bad") * F.lit(1.50), F.lit(0.95)))
+        .withColumn("_p_edr60", F.least(F.col("_p_bad") * F.lit(1.25), F.lit(0.95)))
+        .withColumn("is_bad", (F.rand(seed=seed)     < F.col("_p_bad")).cast("int"))
+        .withColumn("edr30",  (F.rand(seed=seed + 1) < F.col("_p_edr30")).cast("int"))
+        .withColumn("edr60",  (F.rand(seed=seed + 2) < F.col("_p_edr60")).cast("int"))
+        .withColumn("edr90",  F.col("is_bad"))
+        .select("creditaccountid", "vintage_month", "is_bad", "edr30", "edr60", "edr90")
+    )
+    n = actuals.count()
+    bad_n = actuals.filter(F.col("is_bad") == 1).count()
+    print(f"Generated actuals_df: {n:,} rows  (bad rate: {bad_n / n:.1%})")
+    return actuals
