@@ -524,6 +524,201 @@ def _collect_flags(
     return flags
 
 
+# ── HTML / PDF export ────────────────────────────────────────────────
+
+_CSS = """
+/* ── Reset & base ───────────────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #ffffff;
+    max-width: 794px;
+    margin: 0 auto;
+    padding: 28px 40px 40px;
+}
+
+/* ── Headings ──────────────────────────────────────────────────── */
+h1 {
+    font-size: 19pt;
+    color: #1a3a5c;
+    border-bottom: 2px solid #1a3a5c;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+}
+h2 {
+    font-size: 14pt;
+    color: #1a3a5c;
+    border-bottom: 1px solid #b8cfe0;
+    padding-bottom: 4px;
+    margin-top: 32px;
+    margin-bottom: 12px;
+}
+h3 {
+    font-size: 11pt;
+    color: #2c5282;
+    margin-top: 20px;
+    margin-bottom: 8px;
+}
+
+/* ── Paragraph & blockquote ──────────────────────────────────────── */
+p { margin-bottom: 10px; }
+blockquote {
+    border-left: 3px solid #b8cfe0;
+    padding: 6px 14px;
+    color: #555;
+    margin: 10px 0 14px;
+    background: #f7fafc;
+    border-radius: 0 3px 3px 0;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────── */
+table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    margin-bottom: 18px;
+    word-wrap: break-word;
+}
+thead tr {
+    background: #1a3a5c;
+    color: #ffffff;
+}
+thead th {
+    padding: 7px 9px;
+    text-align: left;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+tbody tr:nth-child(odd)  { background: #f7fafc; }
+tbody tr:nth-child(even) { background: #ffffff; }
+tbody td {
+    padding: 5px 9px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+}
+
+/* ── Code ────────────────────────────────────────────────────────── */
+code {
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 9pt;
+    background: #f0f4f8;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+
+/* ── Horizontal rule ─────────────────────────────────────────────── */
+hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 22px 0;
+}
+
+/* ── Page-break helper ───────────────────────────────────────────── */
+.page-break {
+    page-break-before: always;
+    break-before: page;
+    padding-top: 12pt;
+}
+
+/* ── Print / @page ───────────────────────────────────────────────── */
+@media print {
+    body { max-width: 100%; padding: 0; }
+    a    { text-decoration: none; color: inherit; }
+}
+@page {
+    size: A4;
+    margin: 18mm 22mm;
+}
+"""
+
+# H2 section letter-prefixes that start a new page when printed.
+_PAGE_BREAK_H2 = frozenset(["B.", "C.", "D."])
+
+
+def _md_to_html(md_text: str, title: str = "Model Report") -> str:
+    """Convert *md_text* to a self-contained HTML document with embedded CSS.
+
+    Requires either the ``markdown`` or ``markdown2`` package::
+
+        pip install markdown        # preferred
+        pip install markdown2       # alternative
+
+    Raises ``ImportError`` with an installation hint if neither is available.
+    Page-break CSS class is injected on the B / C / D section headings.
+    """
+    try:
+        import markdown as _md
+        body_html = _md.markdown(md_text, extensions=["tables"])
+    except ImportError:
+        try:
+            import markdown2 as _md2
+            body_html = _md2.markdown(md_text, extras=["tables"])
+        except ImportError:
+            raise ImportError(
+                "HTML export requires 'markdown' or 'markdown2'. "
+                "Install with: pip install markdown"
+            )
+
+    # Inject page-break class on major section <h2> headings.
+    import re
+
+    def _maybe_break(m: re.Match) -> str:
+        text = m.group(1)
+        prefix = text.split()[0] if text.split() else ""
+        if prefix in _PAGE_BREAK_H2:
+            return f'<h2 class="page-break">{text}</h2>'
+        return m.group(0)
+
+    body_html = re.sub(r"<h2>(.*?)</h2>", _maybe_break, body_html, flags=re.DOTALL)
+
+    return (
+        '<!DOCTYPE html>\n'
+        '<html lang="en">\n'
+        '<head>\n'
+        '  <meta charset="UTF-8">\n'
+        '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        f'  <title>{title}</title>\n'
+        f'  <style>{_CSS}  </style>\n'
+        '</head>\n'
+        '<body>\n'
+        f'{body_html}\n'
+        '</body>\n'
+        '</html>\n'
+    )
+
+
+def _html_to_pdf(html_text: str, pdf_path: Path) -> bool:
+    """Write *html_text* as a PDF to *pdf_path*.
+
+    Tries WeasyPrint first (preferred), then pdfkit (requires wkhtmltopdf).
+    Returns ``True`` on success, ``False`` if no PDF library is available.
+    Install a library to enable PDF output::
+
+        pip install weasyprint        # recommended
+        pip install pdfkit            # alternative (also needs wkhtmltopdf)
+    """
+    try:
+        from weasyprint import HTML as _WP  # type: ignore[import]
+        _WP(string=html_text).write_pdf(str(pdf_path))
+        return True
+    except ImportError:
+        pass
+
+    try:
+        import pdfkit as _pk  # type: ignore[import]
+        _pk.from_string(html_text, str(pdf_path))
+        return True
+    except ImportError:
+        pass
+
+    return False
+
+
 # ── Public API ────────────────────────────────────────────────────────
 
 def build_report(
@@ -533,7 +728,16 @@ def build_report(
     model_version: str,
     output_path: str | None = None,
 ) -> str:
-    """Build a markdown monitoring report from Layer 2 / Layer 3 DataFrames.
+    """Build a monitoring report from Layer 2 / Layer 3 DataFrames.
+
+    When *output_path* is supplied three files are written:
+
+    * ``{stem}.md``   — Markdown (canonical source, always written)
+    * ``{stem}.html`` — Self-contained HTML with embedded CSS
+    * ``{stem}.pdf``  — Print-ready PDF (requires ``weasyprint`` or ``pdfkit``)
+
+    HTML and PDF generation are optional extras; the function always returns
+    the markdown string regardless.
 
     Args:
         outputs: Flat ``{table_name: DataFrame}`` dict as returned by
@@ -542,8 +746,9 @@ def build_report(
         score_month: YYYY-MM label for this pipeline run.  Used to filter
             per-vintage rows; falls back to the latest vintage if not present.
         model_version: Version tag written into the report header.
-        output_path: Optional file path to write the markdown report.
-            Parent directories are created automatically.
+        output_path: Optional path for the ``.md`` file.  HTML and PDF are
+            written to the same directory with the same stem.  Parent
+            directories are created automatically.
 
     Returns:
         The full markdown report as a string.
@@ -642,9 +847,33 @@ def build_report(
 
     # ── Write to file ─────────────────────────────────────────────────
     if output_path:
-        dest = Path(output_path)
+        dest = Path(output_path).with_suffix(".md")
         dest.parent.mkdir(parents=True, exist_ok=True)
+
+        # Markdown — canonical source.
         dest.write_text(report, encoding="utf-8")
-        logger.info("Report written to %s", dest)
+        logger.info("Markdown report -> %s", dest)
+
+        # HTML — self-contained with embedded CSS.
+        try:
+            html_text = _md_to_html(report, title=f"{config.display_name} — {vm}")
+            html_dest = dest.with_suffix(".html")
+            html_dest.write_text(html_text, encoding="utf-8")
+            logger.info("HTML report    -> %s", html_dest)
+        except ImportError as exc:
+            logger.warning("HTML export skipped: %s", exc)
+            html_text = None
+
+        # PDF — requires weasyprint or pdfkit.
+        if html_text is not None:
+            pdf_dest = dest.with_suffix(".pdf")
+            ok = _html_to_pdf(html_text, pdf_dest)
+            if ok:
+                logger.info("PDF report     -> %s", pdf_dest)
+            else:
+                logger.warning(
+                    "PDF export skipped — install weasyprint to enable: "
+                    "pip install weasyprint"
+                )
 
     return report
