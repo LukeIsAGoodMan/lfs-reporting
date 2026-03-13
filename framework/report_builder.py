@@ -140,7 +140,10 @@ def _vm_rows(df: DataFrame | None, vintage_month: str) -> list:
     """Collect rows from *df* filtered to a single vintage_month."""
     if df is None:
         return []
-    return df.filter(F.col("vintage_month") == vintage_month).collect()
+    return [
+        row.asDict()
+        for row in df.filter(F.col("vintage_month") == vintage_month).collect()
+    ]
 
 
 def _latest_vm(df: DataFrame | None, score_month: str) -> str:
