@@ -692,47 +692,9 @@ def _md_to_html(md_text: str, title: str = "Model Report") -> str:
     )
 
 
-def _html_to_pdf(html_text: str, pdf_path: Path) -> bool:
-    """Write *html_text* as a PDF to *pdf_path*.
-
-    Tries WeasyPrint first (preferred), then pdfkit (requires wkhtmltopdf).
-    Returns ``True`` on success, ``False`` if no PDF library is available.
-    Install a library to enable PDF output::
-
-        pip install weasyprint        # recommended
-        pip install pdfkit            # alternative (also needs wkhtmltopdf)
-    """
-    try:
-        from weasyprint import HTML as _WP  # type: ignore[import]
-        _WP(string=html_text).write_pdf(str(pdf_path))
-        return True
-    except ImportError:
-        pass
-
-    try:
-        import pdfkit as _pk  # type: ignore[import]
-        _pk.from_string(html_text, str(pdf_path))
-        return True
-    except ImportError:
-        pass
-
-    return False
-
-
 def _detect_html_backend() -> str | None:
     """Return the name of the available HTML-conversion library, or ``None``."""
     for name in ("markdown", "markdown2"):
-        try:
-            __import__(name)
-            return name
-        except ImportError:
-            pass
-    return None
-
-
-def _detect_pdf_backend() -> str | None:
-    """Return the name of the available PDF-generation library, or ``None``."""
-    for name in ("weasyprint", "pdfkit"):
         try:
             __import__(name)
             return name
@@ -752,17 +714,14 @@ def build_report(
 ) -> dict[str, str | None]:
     """Build a monitoring report from Layer 2 / Layer 3 DataFrames.
 
-    When *output_dir* is supplied, three files are written to that directory
+    When *output_dir* is supplied, two files are written to that directory
     with a date-stamped filename::
 
         {model}_report_{score_month}_{model_version}_{YYYY-MM-DD}.md
         {model}_report_{score_month}_{model_version}_{YYYY-MM-DD}.html
-        {model}_report_{score_month}_{model_version}_{YYYY-MM-DD}.pdf
 
     HTML requires ``markdown`` or ``markdown2`` (``pip install markdown``).
-    PDF requires ``weasyprint`` or ``pdfkit`` (``pip install weasyprint``).
-    Missing backends are reported via a printed message and the corresponding
-    path in the return dict is ``None``.
+    If the library is missing, a message is printed and ``"html"`` is ``None``.
 
     Args:
         outputs: Flat ``{table_name: DataFrame}`` dict as returned by
@@ -776,9 +735,8 @@ def build_report(
             written.
 
     Returns:
-        ``{"md": path|None, "html": path|None, "pdf": path|None}`` — absolute
-        paths to the files that were written, or ``None`` for outputs that
-        were skipped.
+        ``{"md": path|None, "html": path|None}`` — absolute paths to the
+        files that were written, or ``None`` for outputs that were skipped.
     """
     timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     logger.info("Building report for model=%s, score_month=%s", config.name, score_month)
@@ -873,7 +831,7 @@ def build_report(
     report = "\n".join(parts)
 
     # ── Write to files ────────────────────────────────────────────────
-    paths: dict[str, str | None] = {"md": None, "html": None, "pdf": None}
+    paths: dict[str, str | None] = {"md": None, "html": None}
 
     if output_dir:
         run_date = datetime.date.today().strftime("%Y-%m-%d")
@@ -888,7 +846,6 @@ def build_report(
         logger.info("Markdown report -> %s", md_path)
 
         # HTML — self-contained with embedded CSS.
-        html_text: str | None = None
         html_path = dest_dir / f"{stem}.html"
         try:
             html_text = _md_to_html(report, title=f"{config.display_name} — {vm}")
@@ -897,15 +854,5 @@ def build_report(
             logger.info("HTML report    -> %s", html_path)
         except ImportError:
             print("HTML export skipped: markdown library not installed")
-
-        # PDF — requires weasyprint or pdfkit.
-        if html_text is not None:
-            pdf_path = dest_dir / f"{stem}.pdf"
-            ok = _html_to_pdf(html_text, pdf_path)
-            if ok:
-                paths["pdf"] = str(pdf_path)
-                logger.info("PDF report     -> %s", pdf_path)
-            else:
-                print("PDF export skipped: no supported PDF backend installed")
 
     return paths
