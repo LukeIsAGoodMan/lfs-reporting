@@ -719,6 +719,28 @@ def _html_to_pdf(html_text: str, pdf_path: Path) -> bool:
     return False
 
 
+def _detect_html_backend() -> str | None:
+    """Return the name of the available HTML-conversion library, or ``None``."""
+    for name in ("markdown", "markdown2"):
+        try:
+            __import__(name)
+            return name
+        except ImportError:
+            pass
+    return None
+
+
+def _detect_pdf_backend() -> str | None:
+    """Return the name of the available PDF-generation library, or ``None``."""
+    for name in ("weasyprint", "pdfkit"):
+        try:
+            __import__(name)
+            return name
+        except ImportError:
+            pass
+    return None
+
+
 # ── Public API ────────────────────────────────────────────────────────
 
 def build_report(
@@ -726,18 +748,21 @@ def build_report(
     config: ModelConfig,
     score_month: str,
     model_version: str,
-    output_path: str | None = None,
-) -> str:
+    output_dir: str | None = None,
+) -> dict[str, str | None]:
     """Build a monitoring report from Layer 2 / Layer 3 DataFrames.
 
-    When *output_path* is supplied three files are written:
+    When *output_dir* is supplied, three files are written to that directory
+    with a date-stamped filename::
 
-    * ``{stem}.md``   — Markdown (canonical source, always written)
-    * ``{stem}.html`` — Self-contained HTML with embedded CSS
-    * ``{stem}.pdf``  — Print-ready PDF (requires ``weasyprint`` or ``pdfkit``)
+        {model}_report_{score_month}_{model_version}_{YYYY-MM-DD}.md
+        {model}_report_{score_month}_{model_version}_{YYYY-MM-DD}.html
+        {model}_report_{score_month}_{model_version}_{YYYY-MM-DD}.pdf
 
-    HTML and PDF generation are optional extras; the function always returns
-    the markdown string regardless.
+    HTML requires ``markdown`` or ``markdown2`` (``pip install markdown``).
+    PDF requires ``weasyprint`` or ``pdfkit`` (``pip install weasyprint``).
+    Missing backends are reported via a printed message and the corresponding
+    path in the return dict is ``None``.
 
     Args:
         outputs: Flat ``{table_name: DataFrame}`` dict as returned by
@@ -746,12 +771,14 @@ def build_report(
         score_month: YYYY-MM label for this pipeline run.  Used to filter
             per-vintage rows; falls back to the latest vintage if not present.
         model_version: Version tag written into the report header.
-        output_path: Optional path for the ``.md`` file.  HTML and PDF are
-            written to the same directory with the same stem.  Parent
-            directories are created automatically.
+        output_dir: Directory where report files are written.  Created
+            automatically if it does not exist.  When ``None`` no files are
+            written.
 
     Returns:
-        The full markdown report as a string.
+        ``{"md": path|None, "html": path|None, "pdf": path|None}`` — absolute
+        paths to the files that were written, or ``None`` for outputs that
+        were skipped.
     """
     timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     logger.info("Building report for model=%s, score_month=%s", config.name, score_month)
@@ -845,35 +872,40 @@ def build_report(
 
     report = "\n".join(parts)
 
-    # ── Write to file ─────────────────────────────────────────────────
-    if output_path:
-        dest = Path(output_path).with_suffix(".md")
-        dest.parent.mkdir(parents=True, exist_ok=True)
+    # ── Write to files ────────────────────────────────────────────────
+    paths: dict[str, str | None] = {"md": None, "html": None, "pdf": None}
 
-        # Markdown — canonical source.
-        dest.write_text(report, encoding="utf-8")
-        logger.info("Markdown report -> %s", dest)
+    if output_dir:
+        run_date = datetime.date.today().strftime("%Y-%m-%d")
+        stem = f"{config.name}_report_{score_month}_{model_version}_{run_date}"
+        dest_dir = Path(output_dir).resolve()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        # Markdown — canonical source, always written.
+        md_path = dest_dir / f"{stem}.md"
+        md_path.write_text(report, encoding="utf-8")
+        paths["md"] = str(md_path)
+        logger.info("Markdown report -> %s", md_path)
 
         # HTML — self-contained with embedded CSS.
+        html_text: str | None = None
+        html_path = dest_dir / f"{stem}.html"
         try:
             html_text = _md_to_html(report, title=f"{config.display_name} — {vm}")
-            html_dest = dest.with_suffix(".html")
-            html_dest.write_text(html_text, encoding="utf-8")
-            logger.info("HTML report    -> %s", html_dest)
-        except ImportError as exc:
-            logger.warning("HTML export skipped: %s", exc)
-            html_text = None
+            html_path.write_text(html_text, encoding="utf-8")
+            paths["html"] = str(html_path)
+            logger.info("HTML report    -> %s", html_path)
+        except ImportError:
+            print("HTML export skipped: markdown library not installed")
 
         # PDF — requires weasyprint or pdfkit.
         if html_text is not None:
-            pdf_dest = dest.with_suffix(".pdf")
-            ok = _html_to_pdf(html_text, pdf_dest)
+            pdf_path = dest_dir / f"{stem}.pdf"
+            ok = _html_to_pdf(html_text, pdf_path)
             if ok:
-                logger.info("PDF report     -> %s", pdf_dest)
+                paths["pdf"] = str(pdf_path)
+                logger.info("PDF report     -> %s", pdf_path)
             else:
-                logger.warning(
-                    "PDF export skipped — install weasyprint to enable: "
-                    "pip install weasyprint"
-                )
+                print("PDF export skipped: no supported PDF backend installed")
 
-    return report
+    return paths
