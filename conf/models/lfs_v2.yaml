@@ -1,0 +1,104 @@
+# LFS Model — V2 Production Monitoring Configuration
+# ─────────────────────────────────────────────────────
+
+model:
+  name: lfs
+  display_name: "Loss Forecast Suite"
+
+source:
+  database: analytics
+  table: lfs_scored_accounts
+  score_col: lfs_score
+  channel_col: channel
+  channels:
+    - digital
+    - directmail
+  key_cols:
+    - creditaccountid
+    - customerid
+  columns:
+    features:
+      - feature_01
+      - feature_02
+      - feature_03
+      - feature_04
+      - feature_05
+      - feature_06
+      - feature_07
+      - feature_08
+      - feature_09
+      - feature_10
+      - feature_11
+
+monitoring:
+  psi_n_bins: 10
+  n_bins: 10
+  segments:
+    - column: source
+      segment_type: source
+    - column: line
+      segment_type: line
+
+baseline_definition:
+  type: fixed_window
+  start_month: "2024-08"
+  end_month: "2025-02"
+  initial_val_config:
+    minimum_history_months: 3
+    fallback_method: first_stable_window
+
+threshold_config:
+  default:
+    psi:
+      warning: 0.10
+      alert: 0.25
+    ks_drop:
+      warning: -0.03
+      alert: -0.07
+    calibration_gap:
+      warning: 0.02
+      alert: 0.05
+    edr_delta:
+      warning: 0.01
+      alert: 0.03
+    missing_rate:
+      warning: 0.01
+      alert: 0.05
+    feature_psi:
+      warning: 0.10
+      alert: 0.25
+
+  model_override:
+    psi:
+      warning: 0.08
+      alert: 0.20
+
+  scorecard_override:
+    SC001:
+      psi:
+        warning: 0.12
+        alert: 0.30
+
+scorecard_config:
+  enabled: false
+  scorecard_column: scorecard_id
+
+backfill_config:
+  enabled: false
+  history_months: 18
+  minimum_months_for_baseline: 12
+
+maturity_handling:
+  on_missing: skip_with_note
+
+sample_size_rules:
+  minimum_accounts_for_ks: 300
+  minimum_bads_for_ks: 30
+  minimum_accounts_for_calibration_bin: 50
+
+explanation_config:
+  enabled: false
+
+output:
+  database: reporting
+  format: parquet
