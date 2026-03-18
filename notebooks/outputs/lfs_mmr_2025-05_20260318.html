@@ -147,7 +147,7 @@ hr {
 <h1>Model Monitoring Report (MMR) -- Loss Forecast Suite</h1>
 <p><strong>Model:</strong> Loss Forecast Suite (<code>lfs</code>)
 <strong>Reporting Month:</strong> 2025-05
-<strong>Generated:</strong> 2026-03-18T13:39:07.236582</p>
+<strong>Generated:</strong> 2026-03-18T16:55:44.231185</p>
 <hr />
 <h2>1. Run Metadata</h2>
 <table>
@@ -172,7 +172,11 @@ hr {
 </tr>
 <tr>
 <td>Run Timestamp</td>
-<td>2026-03-18T13:39:07.236582</td>
+<td>2026-03-18T16:55:44.231185</td>
+</tr>
+<tr>
+<td>Data Mode</td>
+<td>MOCK/INJECTED</td>
 </tr>
 <tr>
 <td>Score Column</td>
@@ -219,26 +223,74 @@ hr {
 </tr>
 <tr>
 <td>Months Included</td>
-<td>0</td>
+<td>7</td>
 </tr>
 <tr>
 <td>Account Count</td>
-<td>0</td>
+<td>3,429</td>
+</tr>
+</tbody>
+</table>
+<h3>Cohort Summary</h3>
+<table>
+<thead>
+<tr>
+<th>Window</th>
+<th>Score Month</th>
+<th>Accounts</th>
+<th>Mature</th>
+<th>Available</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>M3</td>
+<td>2025-02</td>
+<td>485</td>
+<td>485</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>M6</td>
+<td>2024-11</td>
+<td>497</td>
+<td>497</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>M9</td>
+<td>2024-08</td>
+<td>491</td>
+<td>491</td>
+<td>Yes</td>
+<td></td>
 </tr>
 </tbody>
 </table>
 <hr />
 <h2>2. Model Health Summary</h2>
-<p><strong>Overall Status: OK</strong>
-- Alerts: 0
-- Warnings: 0
-- Total flags: 0</p>
-<p><strong>Model Health: OK</strong></p>
+<p><strong>Overall Status: ALERT</strong>
+- Alerts: 3
+- Warnings: 2
+- Total flags: 5</p>
+<p><strong>Model Health: ALERT</strong></p>
 <p><strong>Key Findings:</strong>
-- All monitored metrics are within acceptable thresholds.
-- Score PSI = 0.0000 -- score distribution is stable.</p>
+- 3 alert-level threshold breaches detected.
+- Score PSI = 0.1747 (WARNING) -- score distribution has shifted vs baseline.
+- Feature drift detected in: feature_03 (0.735), feature_10 (0.722), feature_01 (0.544).
+- EDR60 (M6) KS = 0.2359, Gini = 0.3060 (N/A).
+- EDR90 (M9) KS = 0.2677, Gini = 0.3653 (N/A).</p>
+<p><strong>Performance Outlook:</strong>
+- EDR30 = 5.98% (bad rate: 5.98%, 485 accounts)
+- EDR60 = 14.49% (bad rate: 14.49%, 497 accounts)
+- EDR90 = 17.52% (bad rate: 17.52%, 491 accounts)
+- Data mode: MOCK/INJECTED</p>
 <p><strong>Recommendations:</strong>
-- No action required. Model operating within normal parameters.</p>
+- Escalate to model governance committee for review.
+- Investigate upstream data pipelines -- score distribution shift detected.</p>
 <hr />
 <h2>3. Stability Analysis</h2>
 <h3>Overall</h3>
@@ -256,10 +308,10 @@ hr {
 <tbody>
 <tr>
 <td>Score PSI</td>
-<td>0.0000</td>
+<td>0.1747</td>
 <td>0.0800</td>
 <td>0.2000</td>
-<td>OK</td>
+<td>WARNING</td>
 </tr>
 </tbody>
 </table>
@@ -276,78 +328,78 @@ hr {
 </thead>
 <tbody>
 <tr>
-<td>feature_01</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>feature_02</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
 <td>feature_03</td>
-<td>0.0000</td>
+<td>0.7350</td>
 <td>0.1000</td>
 <td>0.2500</td>
-<td>OK</td>
+<td>ALERT</td>
+</tr>
+<tr>
+<td>feature_10</td>
+<td>0.7222</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>ALERT</td>
+</tr>
+<tr>
+<td>feature_01</td>
+<td>0.5437</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>ALERT</td>
 </tr>
 <tr>
 <td>feature_04</td>
-<td>0.0000</td>
+<td>0.2077</td>
 <td>0.1000</td>
 <td>0.2500</td>
-<td>OK</td>
+<td>WARNING</td>
 </tr>
 <tr>
-<td>feature_05</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>feature_06</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>feature_07</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>feature_08</td>
-<td>0.0000</td>
+<td>feature_11</td>
+<td>0.0404</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
 </tr>
 <tr>
 <td>feature_09</td>
-<td>0.0000</td>
+<td>0.0372</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
 </tr>
 <tr>
-<td>feature_10</td>
-<td>0.0000</td>
+<td>feature_06</td>
+<td>0.0348</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
 </tr>
 <tr>
-<td>feature_11</td>
-<td>0.0000</td>
+<td>feature_08</td>
+<td>0.0299</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>feature_05</td>
+<td>0.0280</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>feature_07</td>
+<td>0.0200</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>feature_02</td>
+<td>0.0159</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
@@ -356,13 +408,445 @@ hr {
 </table>
 <hr />
 <h2>4. Separation (Discriminatory Power)</h2>
-<p><em>No separation data available. Performance cohorts may not have matured.</em></p>
+<h3>Overall</h3>
+<table>
+<thead>
+<tr>
+<th>Scorecard</th>
+<th>Window</th>
+<th>KS</th>
+<th>Gini</th>
+<th>Baseline KS</th>
+<th>KS Drop</th>
+<th>Monotonic</th>
+<th>Misranks</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overall</td>
+<td>M3</td>
+<td>--</td>
+<td>--</td>
+<td>--</td>
+<td>--</td>
+<td>No</td>
+<td>0</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>M6</td>
+<td>0.2359</td>
+<td>0.3060</td>
+<td>--</td>
+<td>--</td>
+<td>No</td>
+<td>5</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>M9</td>
+<td>0.2677</td>
+<td>0.3653</td>
+<td>--</td>
+<td>--</td>
+<td>No</td>
+<td>6</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>M12</td>
+<td>--</td>
+<td>--</td>
+<td>--</td>
+<td>--</td>
+<td>--</td>
+<td>--</td>
+<td>N/A</td>
+</tr>
+</tbody>
+</table>
+<h4>Overall -- M6 Odds Table</h4>
+<table>
+<thead>
+<tr>
+<th>Scorecard</th>
+<th>Score Bin</th>
+<th>Accounts</th>
+<th>Goods</th>
+<th>Bads</th>
+<th>Odds</th>
+<th>Bad Rate</th>
+<th>Monotonic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overall</td>
+<td>1</td>
+<td>54</td>
+<td>50</td>
+<td>4</td>
+<td>12.50</td>
+<td>7.41%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>2</td>
+<td>45</td>
+<td>44</td>
+<td>1</td>
+<td>44.00</td>
+<td>2.22%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>3</td>
+<td>56</td>
+<td>52</td>
+<td>4</td>
+<td>13.00</td>
+<td>7.14%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>4</td>
+<td>55</td>
+<td>44</td>
+<td>11</td>
+<td>4.00</td>
+<td>20.00%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>5</td>
+<td>63</td>
+<td>54</td>
+<td>9</td>
+<td>6.00</td>
+<td>14.29%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>6</td>
+<td>51</td>
+<td>43</td>
+<td>8</td>
+<td>5.38</td>
+<td>15.69%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>7</td>
+<td>39</td>
+<td>33</td>
+<td>6</td>
+<td>5.50</td>
+<td>15.38%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>8</td>
+<td>54</td>
+<td>45</td>
+<td>9</td>
+<td>5.00</td>
+<td>16.67%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>9</td>
+<td>45</td>
+<td>38</td>
+<td>7</td>
+<td>5.43</td>
+<td>15.56%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>10</td>
+<td>35</td>
+<td>22</td>
+<td>13</td>
+<td>1.69</td>
+<td>37.14%</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<h4>Overall -- M9 Odds Table</h4>
+<table>
+<thead>
+<tr>
+<th>Scorecard</th>
+<th>Score Bin</th>
+<th>Accounts</th>
+<th>Goods</th>
+<th>Bads</th>
+<th>Odds</th>
+<th>Bad Rate</th>
+<th>Monotonic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overall</td>
+<td>1</td>
+<td>48</td>
+<td>46</td>
+<td>2</td>
+<td>23.00</td>
+<td>4.17%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>2</td>
+<td>53</td>
+<td>51</td>
+<td>2</td>
+<td>25.50</td>
+<td>3.77%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>3</td>
+<td>51</td>
+<td>46</td>
+<td>5</td>
+<td>9.20</td>
+<td>9.80%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>4</td>
+<td>46</td>
+<td>37</td>
+<td>9</td>
+<td>4.11</td>
+<td>19.57%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>5</td>
+<td>57</td>
+<td>47</td>
+<td>10</td>
+<td>4.70</td>
+<td>17.54%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>6</td>
+<td>59</td>
+<td>46</td>
+<td>13</td>
+<td>3.54</td>
+<td>22.03%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>7</td>
+<td>59</td>
+<td>50</td>
+<td>9</td>
+<td>5.56</td>
+<td>15.25%</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>8</td>
+<td>43</td>
+<td>32</td>
+<td>11</td>
+<td>2.91</td>
+<td>25.58%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>9</td>
+<td>39</td>
+<td>29</td>
+<td>10</td>
+<td>2.90</td>
+<td>25.64%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>10</td>
+<td>36</td>
+<td>21</td>
+<td>15</td>
+<td>1.40</td>
+<td>41.67%</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h2>5. Performance (Early Default Rates)</h2>
-<p><em>No performance data available.</em></p>
+<h3>Overall</h3>
+<table>
+<thead>
+<tr>
+<th>Scorecard</th>
+<th>Window</th>
+<th>Channel</th>
+<th>Accounts</th>
+<th>Bads</th>
+<th>Bad Rate</th>
+<th>EDR</th>
+<th>EDR Delta</th>
+<th>Warn</th>
+<th>Alert</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overall</td>
+<td>EDR30</td>
+<td>all</td>
+<td>485</td>
+<td>29</td>
+<td>5.98%</td>
+<td>5.98%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR30</td>
+<td>digital</td>
+<td>239</td>
+<td>14</td>
+<td>5.86%</td>
+<td>5.86%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR30</td>
+<td>directmail</td>
+<td>246</td>
+<td>15</td>
+<td>6.10%</td>
+<td>6.10%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR60</td>
+<td>all</td>
+<td>497</td>
+<td>72</td>
+<td>14.49%</td>
+<td>14.49%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR60</td>
+<td>digital</td>
+<td>247</td>
+<td>43</td>
+<td>17.41%</td>
+<td>17.41%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR60</td>
+<td>directmail</td>
+<td>250</td>
+<td>29</td>
+<td>11.60%</td>
+<td>11.60%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR90</td>
+<td>all</td>
+<td>491</td>
+<td>86</td>
+<td>17.52%</td>
+<td>17.52%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR90</td>
+<td>digital</td>
+<td>246</td>
+<td>52</td>
+<td>21.14%</td>
+<td>21.14%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>EDR90</td>
+<td>directmail</td>
+<td>245</td>
+<td>34</td>
+<td>13.88%</td>
+<td>13.88%</td>
+<td>--</td>
+<td>0.0100</td>
+<td>0.0300</td>
+<td>--</td>
+</tr>
+</tbody>
+</table>
 <hr />
-<h2>6. Calibration (Predicted vs Actual)</h2>
-<p><em>No calibration data available.</em></p>
+<h2>6. Calibration (M12 -- 1-Year Charge-Off)</h2>
+<p>Calibration is assessed at the M12 window only. M3/M6/M9 are early-read performance diagnostics, not calibration targets.</p>
+<p><em>No M12 calibration data available.</em></p>
 <hr />
 <h2>7. Data Quality</h2>
 <h3>Overall</h3>
@@ -401,71 +885,47 @@ hr {
 <tr>
 <td>overall</td>
 <td>Score PSI</td>
-<td>0.0000</td>
+<td>0.1747</td>
 <td>0.0800</td>
 <td>0.2000</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>overall</td>
-<td>Feature PSI: feature_01</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>overall</td>
-<td>Feature PSI: feature_02</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
+<td>WARNING</td>
 </tr>
 <tr>
 <td>overall</td>
 <td>Feature PSI: feature_03</td>
-<td>0.0000</td>
+<td>0.7350</td>
 <td>0.1000</td>
 <td>0.2500</td>
-<td>OK</td>
+<td>ALERT</td>
+</tr>
+<tr>
+<td>overall</td>
+<td>Feature PSI: feature_10</td>
+<td>0.7222</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>ALERT</td>
+</tr>
+<tr>
+<td>overall</td>
+<td>Feature PSI: feature_01</td>
+<td>0.5437</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>ALERT</td>
 </tr>
 <tr>
 <td>overall</td>
 <td>Feature PSI: feature_04</td>
-<td>0.0000</td>
+<td>0.2077</td>
 <td>0.1000</td>
 <td>0.2500</td>
-<td>OK</td>
+<td>WARNING</td>
 </tr>
 <tr>
 <td>overall</td>
-<td>Feature PSI: feature_05</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>overall</td>
-<td>Feature PSI: feature_06</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>overall</td>
-<td>Feature PSI: feature_07</td>
-<td>0.0000</td>
-<td>0.1000</td>
-<td>0.2500</td>
-<td>OK</td>
-</tr>
-<tr>
-<td>overall</td>
-<td>Feature PSI: feature_08</td>
-<td>0.0000</td>
+<td>Feature PSI: feature_11</td>
+<td>0.0404</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
@@ -473,34 +933,59 @@ hr {
 <tr>
 <td>overall</td>
 <td>Feature PSI: feature_09</td>
-<td>0.0000</td>
+<td>0.0372</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
 </tr>
 <tr>
 <td>overall</td>
-<td>Feature PSI: feature_10</td>
-<td>0.0000</td>
+<td>Feature PSI: feature_06</td>
+<td>0.0348</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
 </tr>
 <tr>
 <td>overall</td>
-<td>Feature PSI: feature_11</td>
-<td>0.0000</td>
+<td>Feature PSI: feature_08</td>
+<td>0.0299</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>overall</td>
+<td>Feature PSI: feature_05</td>
+<td>0.0280</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>overall</td>
+<td>Feature PSI: feature_07</td>
+<td>0.0200</td>
+<td>0.1000</td>
+<td>0.2500</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>overall</td>
+<td>Feature PSI: feature_02</td>
+<td>0.0159</td>
 <td>0.1000</td>
 <td>0.2500</td>
 <td>OK</td>
 </tr>
 </tbody>
 </table>
-<p><strong>All metrics within acceptable thresholds.</strong></p>
+<p><strong>5 metric(s) outside acceptable thresholds.</strong></p>
 <hr />
 <h2>9. Diagnostics</h2>
 <ul>
-<li>No diagnostic issues identified. Model is operating normally.</li>
+<li>Moderate score distribution shift (PSI = 0.1747). Monitor for sustained drift over the next 1-2 months.</li>
+<li>4 features showing simultaneous drift. This pattern suggests a systemic upstream data change rather than isolated variable issues.</li>
 </ul>
 <hr />
 <p><em>Model Monitoring Report generated by V2 Framework | Loss Forecast Suite | 2025-05</em></p>

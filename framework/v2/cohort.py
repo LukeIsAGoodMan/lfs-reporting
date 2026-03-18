@@ -22,6 +22,17 @@ MATURITY_MAP = {
     "M12": {"months_back": 12, "edr_col": "co_m12",    "bad_col": "badco_m12", "maturity_flag": "is_mature_m12"},
 }
 
+# Semantic window classification
+# Separation: KS / Gini / Odds computed for all windows with actuals
+SEPARATION_WINDOWS = frozenset({"M3", "M6", "M9", "M12"})
+# Early-read performance: EDR rate monitoring only
+EARLY_READ_WINDOWS = frozenset({"M3", "M6", "M9"})
+# Calibration: predicted vs actual — M12 (target window) ONLY
+CALIBRATION_WINDOWS = frozenset({"M12"})
+
+# Display labels for early-read metrics
+EDR_DISPLAY = {"M3": "EDR30", "M6": "EDR60", "M9": "EDR90", "M12": "CO"}
+
 
 class CohortResult:
     """Container for a single maturity cohort."""

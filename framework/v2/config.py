@@ -39,6 +39,31 @@ class SampleSizeRules:
     minimum_accounts_for_calibration_bin: int = 50
 
 @dataclass
+class ActualSourceConfig:
+    """Configuration for loading actual performance data from a production table."""
+    enabled: bool = False
+    database: str = ""
+    table: str = ""
+    key_cols: list[str] = field(default_factory=lambda: ["creditaccountid"])
+    score_month_col: str = "score_month"
+
+@dataclass
+class TargetDefinition:
+    """Defines the model target and maturity-window metric mapping.
+
+    Calibration is assessed ONLY at M12 (1-year charge-off).
+    M3/M6/M9 are early-read performance / separation windows.
+    """
+    target_name: str = "1-year charge-off"
+    calibration_target: str = "badco_m12"
+    early_read_targets: dict[str, str] = field(default_factory=lambda: {
+        "M3": "edr30_m3", "M6": "edr60_m6", "M9": "edr90_m9",
+    })
+    separation_targets: dict[str, str] = field(default_factory=lambda: {
+        "M3": "bad30_m3", "M6": "bad60_m6", "M9": "bad90_m9", "M12": "badco_m12",
+    })
+
+@dataclass
 class MonitoringConfig:
     model_name: str
     display_name: str
@@ -61,6 +86,9 @@ class MonitoringConfig:
     backfill_minimum_baseline: int = 12
 
     explanation_enabled: bool = False
+
+    actual_source: ActualSourceConfig | None = None
+    target: TargetDefinition = field(default_factory=TargetDefinition)
 
     maturity_on_missing: str = "skip_with_note"  # "skip_with_note" | "fail"
 
@@ -121,6 +149,25 @@ def _parse_config(raw: dict) -> MonitoringConfig:
     # Parse backfill
     bf_raw = raw.get("backfill_config", {})
 
+    # Parse actual source
+    as_raw = raw.get("actual_source", {})
+    actual_source = ActualSourceConfig(
+        enabled=as_raw.get("enabled", False),
+        database=as_raw.get("database", ""),
+        table=as_raw.get("table", ""),
+        key_cols=as_raw.get("key_cols", ["creditaccountid"]),
+        score_month_col=as_raw.get("score_month_col", "score_month"),
+    ) if as_raw else None
+
+    # Parse target definition
+    td_raw = raw.get("target_definition", {})
+    target = TargetDefinition(
+        target_name=td_raw.get("target_name", "1-year charge-off"),
+        calibration_target=td_raw.get("calibration_target", "badco_m12"),
+        early_read_targets=td_raw.get("early_read_targets", {"M3": "edr30_m3", "M6": "edr60_m6", "M9": "edr90_m9"}),
+        separation_targets=td_raw.get("separation_targets", {"M3": "bad30_m3", "M6": "bad60_m6", "M9": "bad90_m9", "M12": "badco_m12"}),
+    )
+
     return MonitoringConfig(
         model_name=model["name"],
         display_name=model.get("display_name", model["name"]),
@@ -139,6 +186,8 @@ def _parse_config(raw: dict) -> MonitoringConfig:
         backfill_history_months=bf_raw.get("history_months", 18),
         backfill_minimum_baseline=bf_raw.get("minimum_months_for_baseline", 12),
         explanation_enabled=ex_raw.get("enabled", False),
+        actual_source=actual_source,
+        target=target,
         maturity_on_missing=raw.get("maturity_handling", {}).get("on_missing", "skip_with_note"),
         psi_n_bins=monitoring.get("psi_n_bins", 10),
         n_bins=monitoring.get("n_bins", 10),

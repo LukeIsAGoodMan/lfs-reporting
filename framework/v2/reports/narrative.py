@@ -93,14 +93,16 @@ def _assess_overall_health(result, thresholds: ThresholdEngine) -> dict:
             findings.append(f"Feature drift detected in: {names}.")
 
     # Separation findings
+    _DISPLAY_LABELS = {"M3": "EDR30", "M6": "EDR60", "M9": "EDR90", "M12": "CO"}
     for sc_id, sep_dict in result.separation.items():
         for label, sep in sep_dict.items():
             if sep and sep.get("ks") is not None:
                 ks_val = sep["ks"]
                 gini_val = sep.get("gini", 0)
                 ks_status = sep.get("ks_drop_status", OK)
+                display = _DISPLAY_LABELS.get(label, label)
                 findings.append(
-                    f"{label} KS = {ks_val:.4f}, Gini = {gini_val:.4f} ({ks_status})."
+                    f"{display} ({label}) KS = {ks_val:.4f}, Gini = {gini_val:.4f} ({ks_status})."
                 )
 
     # Data quality
@@ -120,26 +122,43 @@ def _summarize_performance(result, config: MonitoringConfig) -> list[str]:
     """Summarise performance metrics across maturity windows."""
     summaries: list[str] = []
 
+    _DISPLAY_LABELS = {"M3": "EDR30", "M6": "EDR60", "M9": "EDR90", "M12": "CO"}
+
     for sc_id, perf_rows in result.performance.items():
         for row in perf_rows:
             # Only include the 'all' channel row to avoid duplication
             if row.get("channel") not in ("all", None):
                 continue
 
+            maturity = row.get("maturity", "")
+            display_label = row.get("display_label") or _DISPLAY_LABELS.get(maturity, maturity)
+
             if row.get("note"):
-                summaries.append(f"{row.get('maturity', 'N/A')}: {row['note']}")
+                summaries.append(f"{display_label}: {row['note']}")
                 continue
 
             edr = row.get("edr")
             bad_rate = row.get("bad_rate")
-            label = row.get("maturity", "")
             acct = row.get("account_count", 0)
 
             if edr is not None:
                 summaries.append(
-                    f"{label} EDR = {edr:.2%} "
+                    f"{display_label} = {edr:.2%} "
                     f"(bad rate: {bad_rate:.2%}, {acct:,} accounts)"
                 )
+
+    # M12 calibration summary if available
+    data_mode = getattr(result, "data_mode", None) or ""
+    for sc_id, calib_dict in result.calibration.items():
+        m12_rows = calib_dict.get("M12") or []
+        if m12_rows:
+            gaps = [abs(r.get("calibration_gap", 0)) for r in m12_rows if r.get("calibration_gap") is not None]
+            if gaps:
+                max_gap = max(gaps)
+                summaries.append(f"M12 Calibration: max |gap| = {max_gap:.2%}")
+
+    if data_mode:
+        summaries.append(f"Data mode: {data_mode}")
 
     return summaries
 
@@ -161,7 +180,7 @@ def _generate_recommendations(result, health: dict, config: MonitoringConfig) ->
         calib_alerts = [f for f in health["alerts"] if "calibration" in f["metric"]]
         if calib_alerts:
             recs.append(
-                "Schedule model recalibration -- predicted vs actual rates diverging."
+                "Schedule model recalibration -- M12 predicted vs actual charge-off rates diverging."
             )
 
         perf_alerts = [f for f in health["alerts"] if "edr" in f["metric"]]

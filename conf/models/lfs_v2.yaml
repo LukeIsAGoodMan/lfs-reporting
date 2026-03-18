@@ -99,6 +99,27 @@ sample_size_rules:
 explanation_config:
   enabled: false
 
+actual_source:
+  enabled: false
+  database: risk_perf
+  table: lfs_performance_actuals
+  key_cols:
+    - creditaccountid
+  score_month_col: score_month
+
+target_definition:
+  target_name: "1-year charge-off"
+  calibration_target: badco_m12
+  early_read_targets:
+    M3: edr30_m3
+    M6: edr60_m6
+    M9: edr90_m9
+  separation_targets:
+    M3: bad30_m3
+    M6: bad60_m6
+    M9: bad90_m9
+    M12: badco_m12
+
 output:
   database: reporting
   format: parquet

@@ -62,11 +62,13 @@ def _section_run_metadata(result, config: MonitoringConfig) -> str:
     """Run metadata: model, reporting month, baseline info, cohort summary."""
     lines = ["## 1. Run Metadata", ""]
 
+    data_mode = getattr(result, "data_mode", None) or "Unknown"
     rows = [
         ["Model", config.display_name],
         ["Model Name", config.model_name],
         ["Reporting Month", result.reporting_month],
         ["Run Timestamp", result.run_timestamp],
+        ["Data Mode", data_mode],
         ["Score Column", config.score_col],
         ["Channel Column", config.channel_col],
         ["Channels", ", ".join(config.channels)],
@@ -235,45 +237,50 @@ def _section_separation(result, config: MonitoringConfig, thresholds: ThresholdE
         ks_warn = thresholds.resolve("ks_drop", "warning", sc_id if sc_id != "overall" else None)
         ks_alert = thresholds.resolve("ks_drop", "alert", sc_id if sc_id != "overall" else None)
 
-        # Summary table
+        # Summary table with monotonicity
         summary_rows = []
         for label in ("M3", "M6", "M9", "M12"):
             sep = sep_dict.get(label)
             if sep is None:
-                summary_rows.append([label, "--", "--", "--", "--", "N/A"])
+                summary_rows.append([sc_label, label, "--", "--", "--", "--", "--", "--", "N/A"])
                 continue
             summary_rows.append([
+                sc_label,
                 label,
                 _f(sep.get("ks"), 4),
                 _f(sep.get("gini"), 4),
                 _f(sep.get("ks_baseline"), 4),
                 _f(sep.get("ks_drop"), 4),
+                "Yes" if sep.get("odds_monotonic") else "No",
+                str(sep.get("misrank_count", 0)),
                 sep.get("ks_drop_status", "--"),
             ])
 
         lines.append(_tbl(
-            ["Window", "KS", "Gini", "Baseline KS", "KS Drop", "Status"],
+            ["Scorecard", "Window", "KS", "Gini", "Baseline KS", "KS Drop", "Monotonic", "Misranks", "Status"],
             summary_rows,
         ))
 
-        # Odds table (if available)
+        # Odds table per maturity window
         for label, sep in sep_dict.items():
-            odds = sep.get("odds_table", [])
+            odds = sep.get("odds", [])
             if odds:
-                lines.append(f"#### {label} Odds Table")
+                lines.append(f"#### {sc_label} -- {label} Odds Table")
                 lines.append("")
                 odds_rows = []
                 for row in odds:
                     odds_rows.append([
-                        str(row.get("decile", row.get("bin", "--"))),
-                        f"{row.get('accounts', 0):,}" if isinstance(row.get("accounts"), (int, float)) else "--",
-                        _pct(row.get("bad_rate")),
+                        sc_label,
+                        str(row.get("score_bin", row.get("decile", row.get("bin", "--")))),
+                        f"{row.get('total', row.get('accounts', 0)):,}" if isinstance(row.get("total", row.get("accounts")), (int, float)) else "--",
+                        f"{row.get('goods', 0):,}" if isinstance(row.get("goods"), (int, float)) else "--",
+                        f"{row.get('bads', 0):,}" if isinstance(row.get("bads"), (int, float)) else "--",
                         _f(row.get("odds"), 2),
-                        _f(row.get("cumulative_bad_pct"), 4),
-                        _f(row.get("cumulative_good_pct"), 4),
+                        _pct(row.get("bad_rate")),
+                        "Yes" if row.get("is_monotonic") else "No",
                     ])
                 lines.append(_tbl(
-                    ["Decile", "Accounts", "Bad Rate", "Odds", "Cum Bad%", "Cum Good%"],
+                    ["Scorecard", "Score Bin", "Accounts", "Goods", "Bads", "Odds", "Bad Rate", "Monotonic"],
                     odds_rows,
                 ))
 
@@ -302,15 +309,17 @@ def _section_performance(result, config: MonitoringConfig, thresholds: Threshold
         edr_alert = thresholds.resolve("edr_delta", "alert", sc_id if sc_id != "overall" else None)
 
         headers = [
-            "Window", "Channel", "Accounts", "Bads", "Bad Rate",
+            "Scorecard", "Window", "Channel", "Accounts", "Bads", "Bad Rate",
             "EDR", "EDR Delta", "Warn", "Alert", "Status",
         ]
         rows = []
         for row in perf_rows:
+            display_label = row.get("display_label") or row.get("maturity", "--")
             note = row.get("note")
             if note:
                 rows.append([
-                    row.get("maturity", "--"),
+                    sc_label,
+                    display_label,
                     row.get("channel", "--"),
                     "--", "--", "--", "--", "--",
                     _f(edr_warn, 4), _f(edr_alert, 4),
@@ -319,7 +328,8 @@ def _section_performance(result, config: MonitoringConfig, thresholds: Threshold
                 continue
 
             rows.append([
-                row.get("maturity", "--"),
+                sc_label,
+                display_label,
                 row.get("channel", "all"),
                 f"{row.get('account_count', 0):,}" if isinstance(row.get("account_count"), (int, float)) else "--",
                 f"{row.get('bad_count', 0):,}" if isinstance(row.get("bad_count"), (int, float)) else "--",
@@ -341,8 +351,14 @@ def _section_performance(result, config: MonitoringConfig, thresholds: Threshold
 
 
 def _section_calibration(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
-    """Calibration section: predicted vs actual by score bin."""
-    lines = ["## 6. Calibration (Predicted vs Actual)", ""]
+    """Calibration section: predicted vs actual by score bin (M12 only)."""
+    lines = ["## 6. Calibration (M12 -- 1-Year Charge-Off)", ""]
+
+    lines.append(
+        "Calibration is assessed at the M12 window only. "
+        "M3/M6/M9 are early-read performance diagnostics, not calibration targets."
+    )
+    lines.append("")
 
     calib_warn = thresholds.resolve("calibration_gap", "warning")
     calib_alert = thresholds.resolve("calibration_gap", "alert")
@@ -352,39 +368,51 @@ def _section_calibration(result, config: MonitoringConfig, thresholds: Threshold
         if not calib_dict:
             continue
 
+        # Only render M12
+        calib_rows = calib_dict.get("M12")
+        if calib_rows is None:
+            continue
+
         has_data = True
         sc_label = sc_id if sc_id != "overall" else "Overall"
         lines.append(f"### {sc_label}")
         lines.append("")
 
-        for label in ("M3", "M6", "M9", "M12"):
-            calib_rows = calib_dict.get(label)
-            if calib_rows is None:
-                continue
+        headers = [
+            "Scorecard", "Channel", "Score Bin", "Accounts", "Predicted Rate",
+            "Actual Rate", "Gap", "Warn", "Alert", "Status",
+        ]
+        rows = []
+        for row in calib_rows:
+            rows.append([
+                sc_label,
+                row.get("channel", "all"),
+                str(row.get("score_bin", "--")),
+                f"{row.get('account_count', 0):,}" if isinstance(row.get("account_count"), (int, float)) else "--",
+                _pct(row.get("predicted_rate")),
+                _pct(row.get("actual_rate")),
+                _f(row.get("calibration_gap"), 4),
+                _f(calib_warn, 4),
+                _f(calib_alert, 4),
+                row.get("gap_status", "--"),
+            ])
+        lines.append(_tbl(headers, rows))
 
-            lines.append(f"#### {label}")
+        # Summary statistics
+        gaps = [abs(r.get("calibration_gap", 0)) for r in calib_rows if r.get("calibration_gap") is not None]
+        if gaps:
+            max_gap = max(gaps)
+            mean_gap = sum(gaps) / len(gaps)
+            worst_bin = None
+            for r in calib_rows:
+                if r.get("calibration_gap") is not None and abs(r["calibration_gap"]) == max_gap:
+                    worst_bin = r.get("score_bin", "?")
+                    break
+            lines.append(f"**Summary:** Max |gap| = {max_gap:.4f}, Mean |gap| = {mean_gap:.4f}, Worst bin = {worst_bin}")
             lines.append("")
 
-            headers = [
-                "Score Bin", "Accounts", "Predicted Rate",
-                "Actual Rate", "Gap", "Warn", "Alert", "Status",
-            ]
-            rows = []
-            for row in calib_rows:
-                rows.append([
-                    str(row.get("score_bin", "--")),
-                    f"{row.get('account_count', 0):,}" if isinstance(row.get("account_count"), (int, float)) else "--",
-                    _pct(row.get("predicted_rate")),
-                    _pct(row.get("actual_rate")),
-                    _f(row.get("calibration_gap"), 4),
-                    _f(calib_warn, 4),
-                    _f(calib_alert, 4),
-                    row.get("gap_status", "--"),
-                ])
-            lines.append(_tbl(headers, rows))
-
     if not has_data:
-        lines.append("_No calibration data available._")
+        lines.append("_No M12 calibration data available._")
         lines.append("")
 
     return "\n".join(lines)
@@ -495,21 +523,22 @@ def _section_governance_flags(result, config: MonitoringConfig, thresholds: Thre
                     row.get("edr_delta_status", "--"),
                 ])
 
-    # Calibration metrics
+    # Calibration metrics (M12 only)
     for sc_id, calib_dict in result.calibration.items():
         sc_key = sc_id if sc_id != "overall" else None
-        for label, calib_rows in calib_dict.items():
-            for crow in (calib_rows or []):
-                gap = crow.get("calibration_gap")
-                if gap is not None:
-                    all_rows.append([
-                        sc_id,
-                        f"Calibration Gap ({label}:bin{crow.get('score_bin', '?')})",
-                        _f(gap, 4),
-                        _f(thresholds.resolve("calibration_gap", "warning", sc_key), 4),
-                        _f(thresholds.resolve("calibration_gap", "alert", sc_key), 4),
-                        crow.get("gap_status", "--"),
-                    ])
+        m12_rows = calib_dict.get("M12") or []
+        for crow in m12_rows:
+            gap = crow.get("calibration_gap")
+            if gap is not None:
+                channel = crow.get("channel", "all")
+                all_rows.append([
+                    sc_id,
+                    f"Calibration Gap (M12:{channel}:bin{crow.get('score_bin', '?')})",
+                    _f(gap, 4),
+                    _f(thresholds.resolve("calibration_gap", "warning", sc_key), 4),
+                    _f(thresholds.resolve("calibration_gap", "alert", sc_key), 4),
+                    crow.get("gap_status", "--"),
+                ])
 
     # Data quality metrics
     for sc_id, dq in result.data_quality.items():
@@ -615,20 +644,20 @@ def _section_diagnostics(result, config: MonitoringConfig, thresholds: Threshold
                         "Consider champion/challenger analysis."
                     )
 
-    # Calibration diagnosis
+    # Calibration diagnosis (M12 only)
     for sc_id, calib_dict in result.calibration.items():
-        for label, calib_rows in calib_dict.items():
-            if not calib_rows:
-                continue
-            large_gaps = [
-                r for r in calib_rows
-                if r.get("calibration_gap") is not None and abs(r["calibration_gap"]) >= 0.05
-            ]
-            if large_gaps:
-                diag_points.append(
-                    f"Calibration divergence at {label}: {len(large_gaps)} bin(s) "
-                    f"with gap >= 5pp. Model recalibration should be evaluated."
-                )
+        m12_rows = calib_dict.get("M12") or []
+        if not m12_rows:
+            continue
+        large_gaps = [
+            r for r in m12_rows
+            if r.get("calibration_gap") is not None and abs(r["calibration_gap"]) >= 0.05
+        ]
+        if large_gaps:
+            diag_points.append(
+                f"M12 Calibration divergence: {len(large_gaps)} bin(s) "
+                f"with gap >= 5pp. Model recalibration should be evaluated."
+            )
 
     if diag_points:
         for point in diag_points:

@@ -59,6 +59,7 @@ class MonitoringResult:
     business_report: str | None = None
     mmr_report: str | None = None
 
+    data_mode: str = ""
     run_timestamp: str = ""
 
 
@@ -103,6 +104,16 @@ def run_monitoring(
         model_name=config.model_name,
         run_timestamp=datetime.datetime.now().isoformat(),
     )
+
+    # ── Auto-load perf mart if not provided ───────────────────────────
+    if perf_mart is None and config.actual_source and config.actual_source.enabled:
+        from framework.v2.perf_mart import build_perf_mart_from_source
+        logger.info("Loading perf mart from configured actual source")
+        perf_mart = build_perf_mart_from_source(spark, config)
+
+    data_mode = "CONFIG-SOURCED" if (config.actual_source and config.actual_source.enabled) else "MOCK/INJECTED"
+    logger.info("Data mode: %s", data_mode)
+    result.data_mode = data_mode
 
     # 2. Validate inputs
     score_warnings = validate_score_mart(score_mart)
@@ -190,12 +201,13 @@ def run_monitoring(
         perf = v2_metrics.compute_performance(cohorts, config, thresholds, sc_id)
         result.performance[sc_id] = perf
 
-        # Calibration (per maturity)
+        # Calibration: M12 (target window) ONLY
         calib_results = {}
-        for label, cohort in cohorts.items():
-            calib = v2_metrics.compute_calibration(cohort, config, thresholds, sc_id)
+        m12_cohort = cohorts.get("M12")
+        if m12_cohort is not None:
+            calib = v2_metrics.compute_calibration(m12_cohort, config, thresholds, sc_id)
             if calib is not None:
-                calib_results[label] = calib
+                calib_results["M12"] = calib
         result.calibration[sc_id] = calib_results
 
     # 9. Explanation (optional)

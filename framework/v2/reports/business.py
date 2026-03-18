@@ -112,14 +112,14 @@ def _section_portfolio_summary(result, config: MonitoringConfig) -> str:
     for sc_id, perf_rows in result.performance.items():
         for row in perf_rows:
             channel = row.get("channel", "all")
-            maturity = row.get("maturity", "")
+            display_label = row.get("display_label") or row.get("maturity", "")
             edr = row.get("edr")
             bad_rate = row.get("bad_rate")
             acct = row.get("account_count", 0)
             if edr is not None:
                 channel_rows.append([
                     channel.title() if channel else "--",
-                    maturity,
+                    display_label,
                     f"{acct:,}" if isinstance(acct, (int, float)) else str(acct),
                     _pct(bad_rate),
                     _pct(edr),
@@ -129,7 +129,7 @@ def _section_portfolio_summary(result, config: MonitoringConfig) -> str:
         lines.append("### Early Performance by Channel")
         lines.append("")
         lines.append(_tbl(
-            ["Channel", "Window", "Accounts", "Bad Rate", "Early Default Rate"],
+            ["Channel", "Window", "Accounts", "Bad Rate", "Default Rate"],
             channel_rows,
         ))
 
@@ -166,33 +166,25 @@ def _section_early_performance(result, config: MonitoringConfig) -> str:
     """Early performance table by maturity window and channel."""
     lines = ["## Early Performance Indicators", ""]
 
-    headers = ["Window", "Channel", "Accounts", "Bad Rate", "Default Rate", "Status"]
+    headers = ["Window", "Rate", "Status", "Note"]
     rows = []
 
     for sc_id, perf_rows in result.performance.items():
         for row in perf_rows:
+            display_label = row.get("display_label") or row.get("maturity", "--")
             note = row.get("note")
             if note:
-                rows.append([
-                    row.get("maturity", "--"),
-                    row.get("channel", "--"),
-                    "--", "--", "--",
-                    note,
-                ])
+                rows.append([display_label, "--", "--", note])
                 continue
 
             edr = row.get("edr")
-            bad_rate = row.get("bad_rate")
-            acct = row.get("account_count", 0)
             status = row.get("edr_delta_status", OK)
 
             rows.append([
-                row.get("maturity", "--"),
-                (row.get("channel") or "All").title(),
-                f"{acct:,}" if isinstance(acct, (int, float)) else str(acct),
-                _pct(bad_rate),
+                display_label,
                 _pct(edr),
                 _status_label(status),
+                "",
             ])
 
     if rows:
@@ -200,6 +192,22 @@ def _section_early_performance(result, config: MonitoringConfig) -> str:
     else:
         lines.append("_Performance data not yet available (cohorts still maturing)._")
         lines.append("")
+
+    # M12 calibration one-line summary
+    for sc_id, calib_dict in result.calibration.items():
+        m12_rows = calib_dict.get("M12") or []
+        if m12_rows:
+            gaps = [abs(r.get("calibration_gap", 0)) for r in m12_rows if r.get("calibration_gap") is not None]
+            if gaps:
+                max_gap = max(gaps)
+                if max_gap >= 0.05:
+                    cal_status = "Alert"
+                elif max_gap >= 0.02:
+                    cal_status = "Warning"
+                else:
+                    cal_status = "On Track"
+                lines.append(f"**M12 Calibration:** max gap {max_gap:.2%} -- {cal_status}")
+                lines.append("")
 
     return "\n".join(lines)
 
@@ -262,10 +270,8 @@ def _flag_to_business_language(flag: dict) -> str:
         )
 
     if "calibration_gap" in metric:
-        parts = metric.replace("calibration_gap:", "").split(":")
-        label = parts[0] if parts else ""
         return (
-            f"Predicted vs actual rates are diverging at {label} "
+            f"M12 calibration: predicted vs actual charge-off rates are diverging "
             f"(gap: {_pct(value)}). The model may need recalibration."
         )
 
@@ -349,6 +355,7 @@ def build_business_report(
         "",
         f"**Reporting Period:** {result.reporting_month}",
         f"**Generated:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"**Data Source:** {'Mock Demo' if 'MOCK' in (getattr(result, 'data_mode', '') or '') else 'Production Actuals'}",
         "",
         "---",
         "",

@@ -8,7 +8,7 @@ from pyspark.sql import DataFrame
 import pyspark.sql.functions as F
 from framework.metrics import psi, ks_statistic, missing_rate, outlier_rate, pearson_corr
 from framework.v2.config import MonitoringConfig
-from framework.v2.cohort import CohortResult, MATURITY_MAP
+from framework.v2.cohort import CohortResult, MATURITY_MAP, EDR_DISPLAY
 from framework.v2.thresholds import ThresholdEngine
 from framework.v2.sample_controls import check_ks_sample, check_calibration_sample
 from framework.utils import get_logger
@@ -161,6 +161,8 @@ def compute_separation(
         "ks_drop": ks_drop,
         "ks_drop_status": ks_drop_status,
         "odds": odds,
+        "odds_monotonic": all(r.get("is_monotonic", True) for r in odds),
+        "misrank_count": sum(1 for r in odds if not r.get("is_monotonic", True)),
         "account_count": cohort.mature_count,
     }
 
@@ -182,6 +184,7 @@ def compute_performance(
                 "maturity": label,
                 "score_month": cohort.score_month,
                 "channel": "all",
+                "display_label": EDR_DISPLAY.get(label, label),
                 "note": cohort.note or "Not available",
             })
             continue
@@ -196,6 +199,7 @@ def compute_performance(
         overall["maturity"] = label
         overall["score_month"] = cohort.score_month
         overall["channel"] = "all"
+        overall["display_label"] = EDR_DISPLAY.get(label, label)
         overall["edr_status"] = thresholds.evaluate(
             "edr_delta", float(overall.get("edr", 0) or 0), scorecard_id,
         )
@@ -210,6 +214,7 @@ def compute_performance(
             ch_row["maturity"] = label
             ch_row["score_month"] = cohort.score_month
             ch_row["channel"] = ch
+            ch_row["display_label"] = EDR_DISPLAY.get(label, label)
             ch_row["edr_status"] = thresholds.evaluate(
                 "edr_delta", float(ch_row.get("edr", 0) or 0), scorecard_id,
             )
@@ -228,6 +233,13 @@ def compute_calibration(
 
     Returns list of dicts per (score_bin, channel) or None if no data.
     """
+    if cohort.label != "M12":
+        logger.warning(
+            "Calibration should only be computed for M12 (1-year charge-off). "
+            "Got '%s' — skipping.", cohort.label,
+        )
+        return None
+
     if not cohort.is_available:
         return None
 
@@ -446,5 +458,20 @@ def _compute_odds(
             "odds": odds,
             "bad_rate": bads / int(r["n"]) if int(r["n"] or 0) > 0 else 0.0,
         })
+
+    # Monotonicity check: odds should increase with score bin
+    prev_odds = None
+    misrank_count = 0
+    for row in odds_list:
+        if prev_odds is not None and row["odds"] < prev_odds:
+            row["is_monotonic"] = False
+            misrank_count += 1
+        else:
+            row["is_monotonic"] = True
+        prev_odds = row["odds"]
+
+    # Stamp summary on each row for easy access
+    for row in odds_list:
+        row["total_misranks"] = misrank_count
 
     return odds_list
