@@ -30,6 +30,7 @@ from framework.v2.thresholds import ThresholdEngine
 from framework.v2.scorecard import get_scorecard_groups
 from framework.v2 import metrics as v2_metrics
 from framework.v2.explanation import compute_explanation
+from framework.v2.context import build_context, BaseReportContext
 from framework.utils import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +59,9 @@ class MonitoringResult:
     # Report paths
     business_report: str | None = None
     mmr_report: str | None = None
+
+    # Shared report context
+    context: BaseReportContext | None = None
 
     data_mode: str = ""
     run_timestamp: str = ""
@@ -222,15 +226,19 @@ def run_monitoring(
     # 10. Collect governance flags
     result.flags = _collect_governance_flags(result, thresholds)
 
-    # 11. Generate reports
+    # 11. Build shared report context
+    context = build_context(result, config)
+    result.context = context
+
+    # 12. Generate reports
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     from framework.v2.reports.business import build_business_report
     from framework.v2.reports.mmr import build_mmr_report
 
-    result.business_report = build_business_report(result, config, thresholds, str(out))
-    result.mmr_report = build_mmr_report(result, config, thresholds, str(out))
+    result.business_report = build_business_report(result, config, thresholds, str(out), context=context)
+    result.mmr_report = build_mmr_report(result, config, thresholds, str(out), context=context)
 
     logger.info("V2 monitoring complete for %s — reports at %s", reporting_month, out)
     return result

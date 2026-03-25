@@ -120,6 +120,17 @@ target_definition:
     M9: bad90_m9
     M12: badco_m12
 
+business_attribution:
+  enabled: true
+  compare_to: prior_month
+  driver_columns:
+    - channel
+    - source
+    - score_decile_static
+  max_drivers: 3
+  min_materiality: 0.02
+  narrative_mode: plain_english
+
 output:
   database: reporting
   format: parquet

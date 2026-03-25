@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 from framework.utils import get_logger
+from framework.v2.attribution import AttributionConfig
 
 logger = get_logger(__name__)
 
@@ -90,6 +91,8 @@ class MonitoringConfig:
     actual_source: ActualSourceConfig | None = None
     target: TargetDefinition = field(default_factory=TargetDefinition)
 
+    attribution_config: AttributionConfig = field(default_factory=AttributionConfig)
+
     maturity_on_missing: str = "skip_with_note"  # "skip_with_note" | "fail"
 
     psi_n_bins: int = 10
@@ -146,6 +149,17 @@ def _parse_config(raw: dict) -> MonitoringConfig:
     # Parse explanation
     ex_raw = raw.get("explanation_config", {})
 
+    # Parse business attribution
+    ba_raw = raw.get("business_attribution", {})
+    attribution_config = AttributionConfig(
+        enabled=ba_raw.get("enabled", False),
+        compare_to=ba_raw.get("compare_to", "prior_month"),
+        driver_columns=ba_raw.get("driver_columns", ["channel", "source"]),
+        max_drivers=ba_raw.get("max_drivers", 3),
+        min_materiality=ba_raw.get("min_materiality", 0.02),
+        narrative_mode=ba_raw.get("narrative_mode", "plain_english"),
+    )
+
     # Parse backfill
     bf_raw = raw.get("backfill_config", {})
 
@@ -186,6 +200,7 @@ def _parse_config(raw: dict) -> MonitoringConfig:
         backfill_history_months=bf_raw.get("history_months", 18),
         backfill_minimum_baseline=bf_raw.get("minimum_months_for_baseline", 12),
         explanation_enabled=ex_raw.get("enabled", False),
+        attribution_config=attribution_config,
         actual_source=actual_source,
         target=target,
         maturity_on_missing=raw.get("maturity_handling", {}).get("on_missing", "skip_with_note"),
