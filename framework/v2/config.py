@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 import yaml
 from framework.utils import get_logger
-from framework.v2.attribution import AttributionConfig
+# AttributionConfig is defined below (in this module) to avoid circular
+# imports.  attribution.py imports it from here, not the other way around.
 
 logger = get_logger(__name__)
 
@@ -63,6 +64,20 @@ class TargetDefinition:
     separation_targets: dict[str, str] = field(default_factory=lambda: {
         "M3": "bad30_m3", "M6": "bad60_m6", "M9": "bad90_m9", "M12": "badco_m12",
     })
+
+@dataclass
+class AttributionConfig:
+    """Config for business attribution analysis.
+
+    Defined here (not in attribution.py) to keep config.py free of
+    circular dependencies.  attribution.py imports this class from here.
+    """
+    enabled: bool = False
+    compare_to: str = "prior_month"       # prior_month | baseline
+    driver_columns: list[str] = field(default_factory=lambda: ["channel", "source"])
+    max_drivers: int = 3
+    min_materiality: float = 0.02
+    narrative_mode: str = "plain_english"
 
 @dataclass
 class MonitoringConfig:

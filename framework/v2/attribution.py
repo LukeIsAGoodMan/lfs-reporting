@@ -13,20 +13,10 @@ from dataclasses import dataclass, field
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 from framework.v2.metrics.schemas import AttributionResult, AttributionDriver, NA_NO_ACTUALS
+from framework.v2.config import AttributionConfig  # canonical location
 from framework.utils import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class AttributionConfig:
-    """Config for business attribution analysis."""
-    enabled: bool = False
-    compare_to: str = "prior_month"       # prior_month | baseline
-    driver_columns: list[str] = field(default_factory=lambda: ["channel", "source"])
-    max_drivers: int = 3
-    min_materiality: float = 0.02
-    narrative_mode: str = "plain_english"
 
 
 def compute_attribution(
