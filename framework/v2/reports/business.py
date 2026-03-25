@@ -334,6 +334,7 @@ def build_business_report(
     config: MonitoringConfig,
     thresholds: ThresholdEngine,
     output_dir: str,
+     context = None,
 ) -> str:
     """Build the business-facing monitoring report.
 
@@ -342,6 +343,8 @@ def build_business_report(
         config: Monitoring configuration.
         thresholds: Threshold engine for status evaluation.
         output_dir: Directory to write the output HTML file.
+        context: Optional BaseReportContext built by runner. Currently accepted
+            for interface consistency with other renderers and future migration.
 
     Returns:
         Absolute path to the generated HTML file.
