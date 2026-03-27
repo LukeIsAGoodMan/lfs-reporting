@@ -140,89 +140,226 @@ def _section_health_summary(result, config: MonitoringConfig, thresholds: Thresh
     return "\n".join(lines)
 
 
-def _section_stability(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
-    """Stability section: PSI/CSI tables with thresholds and status."""
-    lines = ["## 3. Stability Analysis", ""]
+def _section_psi(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
+    """Section 3: Full PSI bucket table."""
+    lines = ["## 3. Score Stability (PSI)", ""]
+
+    for sc_id, stab in result.stability.items():
+        sc_label = sc_id if sc_id != "overall" else "Overall"
+
+        # Summary line
+        psi_val = stab.get("score_psi")
+        psi_status = stab.get("score_psi_status", "--")
+        lines.append(f"### {sc_label}")
+        lines.append(f"**Score PSI: {_f(psi_val, 4)} ({psi_status})**")
+        lines.append("")
+
+        # Full bucket table
+        psi_table = stab.get("psi_table", [])
+        if psi_table:
+            headers = [
+                "Score Interval", "Baseline Count", "Compare Count",
+                "Baseline %", "Compare %", "Difference",
+                "Obs/Baseline Ratio", "WoE", "Contribution",
+            ]
+            rows = []
+            total_contribution = 0.0
+            for row in psi_table:
+                contribution = row.get("contribution", 0)
+                total_contribution += contribution
+                rows.append([
+                    row.get("interval", "--"),
+                    f"{row.get('baseline_count', 0):,}",
+                    f"{row.get('compare_count', 0):,}",
+                    _pct(row.get("baseline_pct")),
+                    _pct(row.get("compare_pct")),
+                    _f(row.get("difference"), 4),
+                    _f(row.get("obs_to_baseline_ratio"), 4),
+                    _f(row.get("woe"), 4),
+                    _f(contribution, 6),
+                ])
+            # Total row
+            rows.append([
+                "**TOTAL**", "", "", "", "", "",
+                "", "", f"**{_f(total_contribution, 6)}**",
+            ])
+            lines.append(_tbl(headers, rows))
+        else:
+            lines.append("_PSI bucket table not available._")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def _section_csi(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
+    """Section 4: Full CSI bucket tables per feature."""
+    lines = ["## 4. Feature Stability (CSI)", ""]
 
     for sc_id, stab in result.stability.items():
         sc_label = sc_id if sc_id != "overall" else "Overall"
         lines.append(f"### {sc_label}")
         lines.append("")
 
-        # Score PSI
-        psi = stab.get("score_psi")
-        psi_status = stab.get("score_psi_status", "--")
-        warn_t = thresholds.resolve("psi", "warning", sc_id if sc_id != "overall" else None)
-        alert_t = thresholds.resolve("psi", "alert", sc_id if sc_id != "overall" else None)
-
-        lines.append("#### Score Distribution Stability (PSI)")
-        lines.append("")
-        lines.append(_tbl(
-            ["Metric", "Value", "Warning", "Alert", "Status"],
-            [["Score PSI", _f(psi), _f(warn_t), _f(alert_t), psi_status]],
-        ))
-
-        # Score statistics
-        stats_rows = []
-        for key, label in [
-            ("current_mean", "Current Mean"),
-            ("baseline_mean", "Baseline Mean"),
-            ("current_std", "Current Std Dev"),
-            ("baseline_std", "Baseline Std Dev"),
-            ("current_accounts", "Current Accounts"),
-            ("baseline_accounts", "Baseline Accounts"),
-        ]:
-            val = stab.get(key)
-            if val is not None:
-                display = f"{val:,.0f}" if "accounts" in key.lower() else _f(val, 4)
-                stats_rows.append([label, display])
-        if stats_rows:
-            lines.append("#### Score Statistics")
+        csi_tables = stab.get("csi_tables", {})
+        if not csi_tables:
+            lines.append("_CSI tables not available._")
             lines.append("")
-            lines.append(_tbl(["Statistic", "Value"], stats_rows))
+            continue
 
-        # Feature PSI
+        # Feature summary first
         feat_psi = stab.get("feature_psi", [])
         if feat_psi:
             feat_warn = thresholds.resolve("feature_psi", "warning", sc_id if sc_id != "overall" else None)
             feat_alert = thresholds.resolve("feature_psi", "alert", sc_id if sc_id != "overall" else None)
-
-            lines.append("#### Feature Stability (PSI)")
-            lines.append("")
-            feat_rows = []
-            for fp in sorted(feat_psi, key=lambda x: x.get("psi", 0), reverse=True):
-                feat_rows.append([
+            summary_rows = []
+            for fp in sorted(feat_psi, key=lambda x: -(x.get("psi") or 0)):
+                summary_rows.append([
                     fp.get("feature_name", "--"),
                     _f(fp.get("psi"), 4),
                     _f(feat_warn, 4),
                     _f(feat_alert, 4),
                     fp.get("status", "--"),
                 ])
+            lines.append("#### Feature PSI Summary")
+            lines.append("")
             lines.append(_tbl(
-                ["Feature", "PSI", "Warning", "Alert", "Status"],
-                feat_rows,
+                ["Feature", "CSI", "Warning", "Alert", "Status"],
+                summary_rows,
             ))
 
-        # Channel PSI
-        channel_psi = stab.get("channel_psi", [])
-        if channel_psi:
-            lines.append("#### Channel-Level PSI")
+        # Detailed CSI tables per feature
+        for feat_name, csi_rows in csi_tables.items():
+            if not csi_rows:
+                continue
+            lines.append(f"#### {feat_name}")
             lines.append("")
-            ch_rows = []
-            for ch in channel_psi:
-                ch_rows.append([
-                    ch.get("channel", "--"),
-                    _f(ch.get("psi"), 4),
-                    ch.get("status", "--"),
+            headers = [
+                "Bin", "Interval", "Min", "Max",
+                "Baseline Count", "Compare Count",
+                "Baseline %", "Compare %",
+                "Difference", "IV Contribution",
+            ]
+            tbl_rows = []
+            total_iv = 0.0
+            for row in csi_rows:
+                iv = row.get("information_value", 0)
+                total_iv += iv
+                tbl_rows.append([
+                    str(row.get("bin_index", "--")),
+                    row.get("interval", "--"),
+                    _f(row.get("min_value"), 4),
+                    _f(row.get("max_value"), 4),
+                    f"{row.get('baseline_count', 0):,}",
+                    f"{row.get('compare_count', 0):,}",
+                    _pct(row.get("baseline_pct")),
+                    _pct(row.get("compare_pct")),
+                    _f(row.get("difference"), 4),
+                    _f(iv, 6),
                 ])
-            lines.append(_tbl(["Channel", "PSI", "Status"], ch_rows))
+            tbl_rows.append([
+                "", "**TOTAL**", "", "", "", "", "", "", "",
+                f"**{_f(total_iv, 6)}**",
+            ])
+            lines.append(_tbl(headers, tbl_rows))
+
+    return "\n".join(lines)
+
+
+def _section_performance(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
+    """Section 5: EDR rank ordering + capture summary per maturity window."""
+    lines = ["## 5. Performance (Early Default Rates)", ""]
+
+    for sc_id, perf_data in result.performance.items():
+        sc_label = sc_id if sc_id != "overall" else "Overall"
+        lines.append(f"### {sc_label}")
+        lines.append("")
+
+        # Handle both old (list) and new (dict) format
+        if isinstance(perf_data, dict):
+            summary = perf_data.get("summary", [])
+            edr_details = perf_data.get("edr_details", {})
+        else:
+            summary = perf_data
+            edr_details = {}
+
+        # Summary table first
+        if summary:
+            edr_warn = thresholds.resolve("edr_delta", "warning", sc_id if sc_id != "overall" else None)
+            edr_alert = thresholds.resolve("edr_delta", "alert", sc_id if sc_id != "overall" else None)
+            sum_headers = ["Window", "Channel", "Accounts", "Bad Rate", "EDR", "Status"]
+            sum_rows = []
+            for row in summary:
+                if row.get("note"):
+                    sum_rows.append([
+                        row.get("display_label", "--"), row.get("channel", "--"),
+                        "--", "--", "--", row.get("note", "--"),
+                    ])
+                else:
+                    sum_rows.append([
+                        row.get("display_label", "--"),
+                        row.get("channel", "all"),
+                        f"{row.get('account_count', 0):,}",
+                        _pct(row.get("bad_rate")),
+                        _pct(row.get("edr")),
+                        row.get("edr_status", "--"),
+                    ])
+            lines.append("#### EDR Summary")
+            lines.append("")
+            lines.append(_tbl(sum_headers, sum_rows))
+
+        # Per-window rank ordering + capture
+        for label in ("M3", "M6", "M9"):
+            detail = edr_details.get(label, {})
+            display = {"M3": "EDR30", "M6": "EDR60", "M9": "EDR90"}.get(label, label)
+
+            rank_table = detail.get("rank_ordering")
+            capture = detail.get("capture_summary")
+
+            if rank_table:
+                lines.append(f"#### {display} -- Rank Ordering ({label})")
+                lines.append("")
+                ro_headers = [
+                    "Score Interval", "Min Score", "Max Score",
+                    "Accounts (N)", "Accounts (%)", "Observation %", "Misrank",
+                ]
+                ro_rows = []
+                for row in rank_table:
+                    misrank = row.get("misrank", "NO")
+                    misrank_display = f"**{misrank}**" if misrank == "YES" else misrank
+                    ro_rows.append([
+                        row.get("interval", "--"),
+                        _f(row.get("min_score"), 2),
+                        _f(row.get("max_score"), 2),
+                        f"{row.get('accounts_n', 0):,}",
+                        _pct(row.get("accounts_pct")),
+                        _pct(row.get("observation_pct")),
+                        misrank_display,
+                    ])
+                lines.append(_tbl(ro_headers, ro_rows))
+
+            if capture:
+                lines.append(f"#### {display} -- Risk Capture Summary ({label})")
+                lines.append("")
+                cap_rows = [[
+                    _f(capture.get("threshold"), 2),
+                    _pct(capture.get("pct_population_flagged")),
+                    _pct(capture.get("pct_bad_captured")),
+                ]]
+                lines.append(_tbl(
+                    ["Threshold", "% Population Flagged", "% Bad Captured"],
+                    cap_rows,
+                ))
+
+    if not result.performance:
+        lines.append("_No performance data available._")
+        lines.append("")
 
     return "\n".join(lines)
 
 
 def _section_separation(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
-    """Separation section: KS/Gini by maturity window with odds table."""
-    lines = ["## 4. Separation (Discriminatory Power)", ""]
+    """Section 6: KS tables with 20 bins per maturity window."""
+    lines = ["## 6. Separation (KS / Gini)", ""]
 
     has_data = False
     for sc_id, sep_dict in result.separation.items():
@@ -234,117 +371,91 @@ def _section_separation(result, config: MonitoringConfig, thresholds: ThresholdE
         lines.append(f"### {sc_label}")
         lines.append("")
 
-        ks_warn = thresholds.resolve("ks_drop", "warning", sc_id if sc_id != "overall" else None)
-        ks_alert = thresholds.resolve("ks_drop", "alert", sc_id if sc_id != "overall" else None)
-
-        # Summary table with monotonicity
+        # KS/Gini summary
         summary_rows = []
         for label in ("M3", "M6", "M9", "M12"):
             sep = sep_dict.get(label)
             if sep is None:
-                summary_rows.append([sc_label, label, "--", "--", "--", "--", "--", "--", "N/A"])
+                summary_rows.append([label, "--", "--", "--", "--", "N/A"])
                 continue
             summary_rows.append([
-                sc_label,
                 label,
                 _f(sep.get("ks"), 4),
                 _f(sep.get("gini"), 4),
-                _f(sep.get("ks_baseline"), 4),
                 _f(sep.get("ks_drop"), 4),
-                "Yes" if sep.get("odds_monotonic") else "No",
                 str(sep.get("misrank_count", 0)),
                 sep.get("ks_drop_status", "--"),
             ])
-
+        lines.append("#### KS / Gini Summary")
+        lines.append("")
         lines.append(_tbl(
-            ["Scorecard", "Window", "KS", "Gini", "Baseline KS", "KS Drop", "Monotonic", "Misranks", "Status"],
+            ["Window", "KS", "Gini", "KS Drop", "Misranks", "Status"],
             summary_rows,
         ))
 
-        # Odds table per maturity window
+        # Full KS tables
+        ks_tables = sep_dict.get("ks_tables", {})
+        for label in ("M3", "M6", "M9", "M12"):
+            ks_tbl = ks_tables.get(label)
+            if not ks_tbl:
+                continue
+
+            display = {"M3": "EDR30", "M6": "EDR60", "M9": "EDR90", "M12": "CO"}.get(label, label)
+            lines.append(f"#### {label} ({display}) -- KS Table")
+            lines.append("")
+
+            ks_headers = [
+                "Tier", "Min Score", "Max Score",
+                "Accounts (N)", "Accounts (%)",
+                "Goods (N)", "Goods (%)",
+                "Bads (N)", "Bads (%)",
+                "Bad Rate", "KS", "Lift",
+            ]
+            ks_rows = []
+            for row in ks_tbl:
+                tier = row.get("tier", "--")
+                is_total = str(tier) == "TOTAL"
+                ks_rows.append([
+                    f"**{tier}**" if is_total else str(tier),
+                    _f(row.get("min_score"), 4) if not is_total else "",
+                    _f(row.get("max_score"), 4) if not is_total else "",
+                    f"{row.get('accounts_n', 0):,}",
+                    _pct(row.get("accounts_pct")),
+                    f"{row.get('goods_n', 0):,}",
+                    _pct(row.get("goods_pct")),
+                    f"{row.get('bads_n', 0):,}",
+                    _pct(row.get("bads_pct")),
+                    _pct(row.get("bad_rate")),
+                    _f(row.get("ks"), 4) if not is_total else f"**{_f(row.get('ks'), 4)}**",
+                    _f(row.get("lift"), 2) if not is_total else "",
+                ])
+            lines.append(_tbl(ks_headers, ks_rows))
+
+        # Odds tables (from existing separation results)
         for label, sep in sep_dict.items():
+            if not isinstance(sep, dict):
+                continue
             odds = sep.get("odds", [])
             if odds:
-                lines.append(f"#### {sc_label} -- {label} Odds Table")
+                lines.append(f"#### {label} -- Odds Table")
                 lines.append("")
                 odds_rows = []
                 for row in odds:
                     odds_rows.append([
-                        sc_label,
-                        str(row.get("score_bin", row.get("decile", row.get("bin", "--")))),
-                        f"{row.get('total', row.get('accounts', 0)):,}" if isinstance(row.get("total", row.get("accounts")), (int, float)) else "--",
-                        f"{row.get('goods', 0):,}" if isinstance(row.get("goods"), (int, float)) else "--",
-                        f"{row.get('bads', 0):,}" if isinstance(row.get("bads"), (int, float)) else "--",
+                        str(row.get("score_bin", "--")),
+                        f"{row.get('goods', 0):,}",
+                        f"{row.get('bads', 0):,}",
                         _f(row.get("odds"), 2),
                         _pct(row.get("bad_rate")),
-                        "Yes" if row.get("is_monotonic") else "No",
+                        "Yes" if row.get("is_monotonic") else "**No**",
                     ])
                 lines.append(_tbl(
-                    ["Scorecard", "Score Bin", "Accounts", "Goods", "Bads", "Odds", "Bad Rate", "Monotonic"],
+                    ["Score Bin", "Goods", "Bads", "Odds", "Bad Rate", "Monotonic"],
                     odds_rows,
                 ))
 
     if not has_data:
-        lines.append("_No separation data available. Performance cohorts may not have matured._")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def _section_performance(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
-    """Performance section: EDR table by maturity x channel."""
-    lines = ["## 5. Performance (Early Default Rates)", ""]
-
-    has_data = False
-    for sc_id, perf_rows in result.performance.items():
-        if not perf_rows:
-            continue
-
-        has_data = True
-        sc_label = sc_id if sc_id != "overall" else "Overall"
-        lines.append(f"### {sc_label}")
-        lines.append("")
-
-        edr_warn = thresholds.resolve("edr_delta", "warning", sc_id if sc_id != "overall" else None)
-        edr_alert = thresholds.resolve("edr_delta", "alert", sc_id if sc_id != "overall" else None)
-
-        headers = [
-            "Scorecard", "Window", "Channel", "Accounts", "Bads", "Bad Rate",
-            "EDR", "EDR Delta", "Warn", "Alert", "Status",
-        ]
-        rows = []
-        for row in perf_rows:
-            display_label = row.get("display_label") or row.get("maturity", "--")
-            note = row.get("note")
-            if note:
-                rows.append([
-                    sc_label,
-                    display_label,
-                    row.get("channel", "--"),
-                    "--", "--", "--", "--", "--",
-                    _f(edr_warn, 4), _f(edr_alert, 4),
-                    note,
-                ])
-                continue
-
-            rows.append([
-                sc_label,
-                display_label,
-                row.get("channel", "all"),
-                f"{row.get('account_count', 0):,}" if isinstance(row.get("account_count"), (int, float)) else "--",
-                f"{row.get('bad_count', 0):,}" if isinstance(row.get("bad_count"), (int, float)) else "--",
-                _pct(row.get("bad_rate")),
-                _pct(row.get("edr")),
-                _f(row.get("edr_delta"), 4),
-                _f(edr_warn, 4),
-                _f(edr_alert, 4),
-                row.get("edr_delta_status", "--"),
-            ])
-
-        lines.append(_tbl(headers, rows))
-
-    if not has_data:
-        lines.append("_No performance data available._")
+        lines.append("_No separation data available._")
         lines.append("")
 
     return "\n".join(lines)
@@ -352,7 +463,7 @@ def _section_performance(result, config: MonitoringConfig, thresholds: Threshold
 
 def _section_calibration(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
     """Calibration section: predicted vs actual by score bin (M12 only)."""
-    lines = ["## 6. Calibration (M12 -- 1-Year Charge-Off)", ""]
+    lines = ["## 7. Calibration (M12 -- 1-Year Charge-Off)", ""]
 
     lines.append(
         "Calibration is assessed at the M12 window only. "
@@ -420,7 +531,7 @@ def _section_calibration(result, config: MonitoringConfig, thresholds: Threshold
 
 def _section_data_quality(result, config: MonitoringConfig) -> str:
     """Data quality section."""
-    lines = ["## 7. Data Quality", ""]
+    lines = ["## 8. Data Quality", ""]
 
     for sc_id, dq in result.data_quality.items():
         sc_label = sc_id if sc_id != "overall" else "Overall"
@@ -462,7 +573,7 @@ def _section_data_quality(result, config: MonitoringConfig) -> str:
 
 def _section_governance_flags(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
     """Governance flags table -- MANDATORY section with ALL metrics and thresholds."""
-    lines = ["## 8. Governance Flags", ""]
+    lines = ["## 9. Governance Flags", ""]
 
     # Build comprehensive flags table including ALL evaluated metrics
     all_rows: list[list[str]] = []
@@ -499,7 +610,7 @@ def _section_governance_flags(result, config: MonitoringConfig, thresholds: Thre
     for sc_id, sep_dict in result.separation.items():
         sc_key = sc_id if sc_id != "overall" else None
         for label, sep in sep_dict.items():
-            if sep and sep.get("ks_drop") is not None:
+            if isinstance(sep, dict) and sep.get("ks_drop") is not None:
                 all_rows.append([
                     sc_id,
                     f"KS Drop ({label})",
@@ -510,8 +621,11 @@ def _section_governance_flags(result, config: MonitoringConfig, thresholds: Thre
                 ])
 
     # Performance metrics
-    for sc_id, perf_rows in result.performance.items():
+    for sc_id, perf_data in result.performance.items():
         sc_key = sc_id if sc_id != "overall" else None
+        perf_rows = perf_data.get("summary", perf_data) if isinstance(perf_data, dict) else perf_data
+        if not isinstance(perf_rows, list):
+            perf_rows = []
         for row in perf_rows:
             if row.get("edr_delta") is not None:
                 all_rows.append([
@@ -577,7 +691,7 @@ def _section_governance_flags(result, config: MonitoringConfig, thresholds: Thre
 
 def _section_diagnostics(result, config: MonitoringConfig, thresholds: ThresholdEngine) -> str:
     """Diagnostics: auto-diagnosis narrative summarising the full picture."""
-    lines = ["## 9. Diagnostics", ""]
+    lines = ["## 10. Diagnostics", ""]
 
     # Auto-diagnosis
     diag_points: list[str] = []
@@ -635,7 +749,7 @@ def _section_diagnostics(result, config: MonitoringConfig, thresholds: Threshold
     # Separation diagnosis
     for sc_id, sep_dict in result.separation.items():
         for label, sep in sep_dict.items():
-            if sep and sep.get("ks_drop") is not None:
+            if isinstance(sep, dict) and sep.get("ks_drop") is not None:
                 drop = sep["ks_drop"]
                 if drop <= -0.07:
                     diag_points.append(
@@ -714,15 +828,19 @@ def build_mmr_report(
         "",
         "---",
         "",
-        _section_stability(result, config, thresholds),
+        _section_psi(result, config, thresholds),
         "",
         "---",
         "",
-        _section_separation(result, config, thresholds),
+        _section_csi(result, config, thresholds),
         "",
         "---",
         "",
         _section_performance(result, config, thresholds),
+        "",
+        "---",
+        "",
+        _section_separation(result, config, thresholds),
         "",
         "---",
         "",

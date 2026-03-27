@@ -70,6 +70,117 @@ def compute_performance(
     return rows
 
 
+def compute_edr_rank_ordering(
+    cohort: CohortResult,
+    config: MonitoringConfig,
+    score_intervals: list[tuple[float, float]],
+) -> list[dict] | None:
+    """EDR rank-ordering table by config-defined score intervals.
+
+    One row per interval. NOT using qcut.
+
+    Returns:
+        List of dicts per interval:
+        - interval, min_score, max_score, accounts_n, accounts_pct,
+          observation_pct, misrank
+    """
+    if not cohort.is_available:
+        return None
+
+    info = MATURITY_MAP[cohort.label]
+    edr_col = info["edr_col"]
+    score_col = config.score_col
+    df = cohort.df
+
+    total_count = df.count()
+    if total_count == 0:
+        return None
+
+    last_idx = len(score_intervals) - 1
+    rows = []
+
+    for i, (lower, upper) in enumerate(score_intervals):
+        if i == last_idx:
+            bucket = df.filter(
+                (F.col(score_col) >= lower) & (F.col(score_col) <= upper)
+            )
+        else:
+            bucket = df.filter(
+                (F.col(score_col) >= lower) & (F.col(score_col) < upper)
+            )
+
+        stats = bucket.agg(
+            F.count("*").alias("n"),
+            F.avg(edr_col).alias("obs_rate"),
+        ).collect()[0]
+
+        n = int(stats["n"] or 0)
+        obs_rate = float(stats["obs_rate"]) if stats["obs_rate"] is not None else 0.0
+
+        rows.append({
+            "interval": f"{lower:.2f}-{upper:.2f}",
+            "min_score": lower,
+            "max_score": upper,
+            "accounts_n": n,
+            "accounts_pct": n / total_count if total_count > 0 else 0.0,
+            "observation_pct": obs_rate,
+            "misrank": "NO",  # placeholder, set below
+        })
+
+    # Sort by min_score ascending
+    rows.sort(key=lambda r: r["min_score"])
+
+    # Check monotonicity: higher score should have higher observation rate
+    for i in range(1, len(rows)):
+        if rows[i]["observation_pct"] < rows[i - 1]["observation_pct"]:
+            rows[i]["misrank"] = "YES"
+
+    return rows
+
+
+def compute_edr_capture_summary(
+    cohort: CohortResult,
+    config: MonitoringConfig,
+    risk_threshold: float = 0.5,
+) -> dict | None:
+    """Risk capture summary for one EDR window.
+
+    Returns:
+        {
+            "threshold": float,
+            "pct_population_flagged": float,
+            "pct_bad_captured": float,
+        }
+        or None if cohort not available.
+    """
+    if not cohort.is_available:
+        return None
+
+    info = MATURITY_MAP[cohort.label]
+    edr_col = info["edr_col"]
+    score_col = config.score_col
+    df = cohort.df
+
+    total_count = df.count()
+    if total_count == 0:
+        return None
+
+    total_bads = df.filter(F.col(edr_col) == 1).count()
+
+    high_risk = df.filter(F.col(score_col) >= risk_threshold)
+    flagged_count = high_risk.count()
+    flagged_bads = high_risk.filter(F.col(edr_col) == 1).count()
+
+    pct_population_flagged = flagged_count / total_count
+    pct_bad_captured = flagged_bads / total_bads if total_bads > 0 else 0.0
+
+    return {
+        "threshold": risk_threshold,
+        "pct_population_flagged": pct_population_flagged,
+        "pct_bad_captured": pct_bad_captured,
+    }
+
+
 # ── Private helpers ───────────────────────────────────────────────────
 
 def _agg_performance(

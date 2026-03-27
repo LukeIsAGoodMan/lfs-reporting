@@ -43,10 +43,18 @@ def compute_calibration(
     # Use score_decile_static if available, else create bins
     bin_col = "score_decile_static"
     if bin_col not in df.columns:
-        # Create decile bins on the fly
-        from pyspark.sql import Window
-        w = Window.orderBy(score_col)
-        df = df.withColumn(bin_col, F.ntile(10).over(w))
+        # Assign decile bins using quantile edges to avoid unpartitioned Window.
+        clean = df.filter(F.col(score_col).isNotNull())
+        edges = clean.stat.approxQuantile(score_col, [i / 10 for i in range(1, 10)], 0.01)
+        edges = sorted(set(edges))
+
+        if edges:
+            expr = F.lit(len(edges) + 1)
+            for i in range(len(edges)):
+                expr = F.when(F.col(score_col) <= edges[i], F.lit(i + 1)).otherwise(expr)
+            df = df.withColumn(bin_col, expr)
+        else:
+            df = df.withColumn(bin_col, F.lit(1))
 
     # Sample check
     ok, reason = check_calibration_sample(df, bin_col, config)

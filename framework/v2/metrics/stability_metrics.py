@@ -137,6 +137,189 @@ def compute_data_quality(
 
 # ── Private helpers ───────────────────────────────────────────────────
 
+def compute_psi_table(
+    current_df: DataFrame,
+    baseline_df: DataFrame,
+    score_col: str,
+    intervals: list[tuple[float, float]],
+) -> list[dict]:
+    """Full PSI table with per-bucket detail.
+
+    Args:
+        current_df: Current period DataFrame.
+        baseline_df: Baseline DataFrame.
+        score_col: Score column name.
+        intervals: List of (lower, upper) tuples defining bucket boundaries.
+            Example: [(0.0, 0.1), (0.1, 0.2), ..., (0.9, 1.0)]
+
+    Returns:
+        List of dicts, one per interval, with keys:
+        - interval, min_score, max_score, baseline_count, compare_count,
+          baseline_pct, compare_pct, difference, obs_to_baseline_ratio,
+          woe, contribution
+    """
+    import math
+
+    EPSILON = 0.0001
+
+    baseline_clean = baseline_df.filter(F.col(score_col).isNotNull())
+    current_clean = current_df.filter(F.col(score_col).isNotNull())
+
+    baseline_total = baseline_clean.count()
+    current_total = current_clean.count()
+
+    if baseline_total == 0 or current_total == 0:
+        return []
+
+    last_idx = len(intervals) - 1
+    rows = []
+
+    for i, (lower, upper) in enumerate(intervals):
+        # Last bucket: inclusive on upper bound
+        if i == last_idx:
+            base_count = baseline_clean.filter(
+                (F.col(score_col) >= lower) & (F.col(score_col) <= upper)
+            ).count()
+            cur_count = current_clean.filter(
+                (F.col(score_col) >= lower) & (F.col(score_col) <= upper)
+            ).count()
+        else:
+            base_count = baseline_clean.filter(
+                (F.col(score_col) >= lower) & (F.col(score_col) < upper)
+            ).count()
+            cur_count = current_clean.filter(
+                (F.col(score_col) >= lower) & (F.col(score_col) < upper)
+            ).count()
+
+        baseline_pct = max(base_count / baseline_total, EPSILON)
+        compare_pct = max(cur_count / current_total, EPSILON)
+
+        difference = compare_pct - baseline_pct
+        obs_to_baseline_ratio = compare_pct / baseline_pct
+        woe = math.log(compare_pct / baseline_pct)
+        contribution = (compare_pct - baseline_pct) * woe
+
+        rows.append({
+            "interval": f"{lower:.2f}-{upper:.2f}",
+            "min_score": lower,
+            "max_score": upper,
+            "baseline_count": base_count,
+            "compare_count": cur_count,
+            "baseline_pct": baseline_pct,
+            "compare_pct": compare_pct,
+            "difference": difference,
+            "obs_to_baseline_ratio": obs_to_baseline_ratio,
+            "woe": woe,
+            "contribution": contribution,
+        })
+
+    return sorted(rows, key=lambda r: r["min_score"])
+
+
+def compute_csi_table(
+    current_df: DataFrame,
+    baseline_df: DataFrame,
+    feature_col: str,
+    n_bins: int = 10,
+) -> list[dict]:
+    """Full CSI table for one feature with per-bucket detail.
+
+    Bins are derived from baseline quantiles (deterministic, not qcut).
+
+    Returns:
+        List of dicts, one per bin:
+        - feature, bin_index, interval, min_value, max_value,
+          baseline_count, compare_count, baseline_pct, compare_pct,
+          difference, information_value
+    """
+    import math
+
+    EPSILON = 0.0001
+
+    baseline_clean = baseline_df.filter(F.col(feature_col).isNotNull())
+    current_clean = current_df.filter(F.col(feature_col).isNotNull())
+
+    baseline_total = baseline_clean.count()
+    current_total = current_clean.count()
+
+    if baseline_total == 0 or current_total == 0:
+        return []
+
+    # Compute quantile edges from baseline
+    fractions = [i / n_bins for i in range(1, n_bins)]
+    edges = baseline_clean.stat.approxQuantile(feature_col, fractions, 0.01)
+
+    if not edges:
+        return []
+
+    # Deduplicate edges and build intervals
+    edges = sorted(set(edges))
+
+    # Get min/max from baseline for boundary bins
+    bounds = baseline_clean.agg(
+        F.min(feature_col).alias("min_val"),
+        F.max(feature_col).alias("max_val"),
+    ).collect()[0]
+    min_val = float(bounds["min_val"])
+    max_val = float(bounds["max_val"])
+
+    # Also consider current min/max so we don't miss observations
+    cur_bounds = current_clean.agg(
+        F.min(feature_col).alias("min_val"),
+        F.max(feature_col).alias("max_val"),
+    ).collect()[0]
+    global_min = min(min_val, float(cur_bounds["min_val"]))
+    global_max = max(max_val, float(cur_bounds["max_val"]))
+
+    # Build interval boundaries
+    boundaries = [global_min] + edges + [global_max]
+
+    rows = []
+    last_idx = len(boundaries) - 2  # number of intervals = len(boundaries) - 1
+
+    for idx in range(len(boundaries) - 1):
+        lower = boundaries[idx]
+        upper = boundaries[idx + 1]
+
+        # Last bucket: inclusive on upper
+        if idx == last_idx:
+            base_count = baseline_clean.filter(
+                (F.col(feature_col) >= lower) & (F.col(feature_col) <= upper)
+            ).count()
+            cur_count = current_clean.filter(
+                (F.col(feature_col) >= lower) & (F.col(feature_col) <= upper)
+            ).count()
+        else:
+            base_count = baseline_clean.filter(
+                (F.col(feature_col) >= lower) & (F.col(feature_col) < upper)
+            ).count()
+            cur_count = current_clean.filter(
+                (F.col(feature_col) >= lower) & (F.col(feature_col) < upper)
+            ).count()
+
+        baseline_pct = max(base_count / baseline_total, EPSILON)
+        compare_pct = max(cur_count / current_total, EPSILON)
+
+        difference = compare_pct - baseline_pct
+        iv = (compare_pct - baseline_pct) * math.log(compare_pct / baseline_pct)
+
+        rows.append({
+            "feature": feature_col,
+            "bin_index": idx,
+            "interval": f"{lower:.4f}-{upper:.4f}",
+            "min_value": lower,
+            "max_value": upper,
+            "baseline_count": base_count,
+            "compare_count": cur_count,
+            "baseline_pct": baseline_pct,
+            "compare_pct": compare_pct,
+            "difference": difference,
+            "information_value": iv,
+        })
+
+    return sorted(rows, key=lambda r: r["bin_index"])
+
+
 def _safe_mean(df: DataFrame, col: str) -> float | None:
     """Safely compute mean of a column."""
     row = df.agg(F.avg(col).alias("m")).collect()[0]

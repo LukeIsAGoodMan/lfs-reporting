@@ -113,6 +113,12 @@ class MonitoringConfig:
     psi_n_bins: int = 10
     n_bins: int = 10
 
+    score_intervals: list[tuple[float, float]] = field(default_factory=lambda: [
+        (i / 10, (i + 1) / 10) for i in range(10)
+    ])
+    risk_threshold: float = 0.5
+    ks_bins: int = 20
+
     output_database: str = "reporting"
     output_format: str = "parquet"
 
@@ -221,9 +227,19 @@ def _parse_config(raw: dict) -> MonitoringConfig:
         maturity_on_missing=raw.get("maturity_handling", {}).get("on_missing", "skip_with_note"),
         psi_n_bins=monitoring.get("psi_n_bins", 10),
         n_bins=monitoring.get("n_bins", 10),
+        score_intervals=_parse_intervals(monitoring.get("score_intervals")),
+        risk_threshold=float(monitoring.get("risk_threshold", 0.5)),
+        ks_bins=int(monitoring.get("ks_bins", 20)),
         output_database=raw.get("output", {}).get("database", "reporting"),
         output_format=raw.get("output", {}).get("format", "parquet"),
     )
+
+def _parse_intervals(raw: list | None) -> list[tuple[float, float]]:
+    """Parse score intervals from YAML list of [lower, upper] pairs."""
+    if not raw:
+        return [(i / 10, (i + 1) / 10) for i in range(10)]
+    return [(float(pair[0]), float(pair[1])) for pair in raw]
+
 
 def _parse_thresholds(raw: dict) -> ThresholdConfig:
     """Parse threshold_config section."""

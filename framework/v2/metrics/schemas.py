@@ -165,6 +165,76 @@ class DataQualityResult:
     na_reason: str | None = None
 
 
+# ── PSI/CSI bucket tables ────────────────────────────────────────────
+
+@dataclass
+class PSIBucketRow:
+    interval: str
+    min_score: float
+    max_score: float
+    baseline_count: int
+    compare_count: int
+    baseline_pct: float
+    compare_pct: float
+    difference: float
+    obs_to_baseline_ratio: float
+    woe: float
+    contribution: float
+
+
+@dataclass
+class CSIBucketRow:
+    feature: str
+    bin_index: int
+    interval: str
+    min_value: float
+    max_value: float
+    baseline_count: int
+    compare_count: int
+    baseline_pct: float
+    compare_pct: float
+    difference: float
+    information_value: float
+
+
+# ── EDR rank ordering ────────────────────────────────────────────────
+
+@dataclass
+class EDRRankRow:
+    interval: str
+    min_score: float
+    max_score: float
+    accounts_n: int
+    accounts_pct: float
+    observation_pct: float
+    misrank: str  # "YES" or "NO"
+
+
+@dataclass
+class EDRCaptureSummary:
+    threshold: float
+    pct_population_flagged: float
+    pct_bad_captured: float
+
+
+# ── KS table ─────────────────────────────────────────────────────────
+
+@dataclass
+class KSTableRow:
+    tier: str  # "1", "2", ..., "20", "TOTAL"
+    min_score: float
+    max_score: float
+    accounts_n: int
+    accounts_pct: float
+    goods_n: int
+    goods_pct: float     # cumulative
+    bads_n: int
+    bads_pct: float      # cumulative
+    bad_rate: float
+    ks: float
+    lift: float
+
+
 # ── Attribution ──────────────────────────────────────────────────────
 
 @dataclass

@@ -90,41 +90,155 @@ def compute_separation(
     }
 
 
+def compute_ks_table(
+    cohort: CohortResult,
+    config: MonitoringConfig,
+    n_bins: int = 20,
+) -> list[dict] | None:
+    """Full KS table with 20 bins (default).
+
+    Uses collect + Python binning to avoid unpartitioned Window operations.
+    Equal-frequency bins are assigned after sorting by score.
+
+    Returns list of dicts per tier (+ TOTAL row) or None if unavailable.
+    """
+    if not cohort.is_available:
+        return None
+
+    info = MATURITY_MAP[cohort.label]
+    bad_col = info["bad_col"]
+    score_col = config.score_col
+    df = cohort.df
+
+    if bad_col not in df.columns:
+        return None
+
+    # Sample check — short-circuit early
+    ok, reason = check_ks_sample(df, bad_col, config)
+    if not ok:
+        logger.info("KS table skipped for %s: %s", cohort.label, reason)
+        return None
+
+    # Collect (score, bad) pairs — cohort data is small enough
+    pairs = df.select(score_col, bad_col).collect()
+    data = sorted(
+        [
+            (float(r[score_col]), int(r[bad_col]))
+            for r in pairs
+            if r[score_col] is not None and r[bad_col] is not None
+        ],
+        key=lambda x: x[0],
+    )
+
+    n = len(data)
+    if n == 0:
+        return None
+
+    # Assign equal-frequency tiers in Python
+    bin_size = n / n_bins
+    from collections import defaultdict
+
+    tier_stats: dict[int, dict] = defaultdict(
+        lambda: {"n": 0, "goods": 0, "bads": 0, "min": float("inf"), "max": float("-inf")}
+    )
+
+    for idx, (score, bad) in enumerate(data):
+        tier = min(int(idx / bin_size) + 1, n_bins)
+        t = tier_stats[tier]
+        t["n"] += 1
+        t["min"] = min(t["min"], score)
+        t["max"] = max(t["max"], score)
+        if bad == 1:
+            t["bads"] += 1
+        else:
+            t["goods"] += 1
+
+    total_goods = sum(t["goods"] for t in tier_stats.values())
+    total_bads = sum(t["bads"] for t in tier_stats.values())
+    overall_bad_rate = total_bads / n if n > 0 else 0.0
+
+    cum_goods = 0
+    cum_bads = 0
+    results = []
+
+    for tier_num in sorted(tier_stats.keys()):
+        t = tier_stats[tier_num]
+        cum_goods += t["goods"]
+        cum_bads += t["bads"]
+
+        cum_good_pct = cum_goods / total_goods if total_goods > 0 else 0.0
+        cum_bad_pct = cum_bads / total_bads if total_bads > 0 else 0.0
+        bad_rate = t["bads"] / t["n"] if t["n"] > 0 else 0.0
+
+        results.append({
+            "tier": str(tier_num),
+            "min_score": t["min"],
+            "max_score": t["max"],
+            "accounts_n": t["n"],
+            "accounts_pct": t["n"] / n,
+            "goods_n": t["goods"],
+            "goods_pct": cum_good_pct,
+            "bads_n": t["bads"],
+            "bads_pct": cum_bad_pct,
+            "bad_rate": bad_rate,
+            "ks": abs(cum_good_pct - cum_bad_pct),
+            "lift": bad_rate / overall_bad_rate if overall_bad_rate > 0 else 0.0,
+        })
+
+    # TOTAL row
+    max_ks = max((r["ks"] for r in results), default=0.0)
+    results.append({
+        "tier": "TOTAL",
+        "min_score": results[0]["min_score"] if results else 0.0,
+        "max_score": results[-1]["max_score"] if results else 0.0,
+        "accounts_n": n,
+        "accounts_pct": 1.0,
+        "goods_n": total_goods,
+        "goods_pct": 1.0,
+        "bads_n": total_bads,
+        "bads_pct": 1.0,
+        "bad_rate": overall_bad_rate,
+        "ks": max_ks,
+        "lift": 1.0,
+    })
+
+    return results
+
+
 # ── Private helpers ───────────────────────────────────────────────────
 
 def _compute_gini(df: DataFrame, score_col: str, target_col: str) -> float | None:
     """Approximate Gini coefficient from score vs binary target.
 
-    Uses the relationship: Gini = 2 * AUC - 1.
-    AUC is approximated by the concordance rate.
+    Uses Gini = 2 * AUC - 1, where AUC is computed via the mean rank method
+    on collected (score, target) pairs.  Avoids unpartitioned Window operations.
     """
     total = df.count()
     if total < 10:
         return None
 
-    bads = df.filter(F.col(target_col) == 1)
-    goods = df.filter(F.col(target_col) == 0)
-    n_bads = bads.count()
-    n_goods = goods.count()
+    # Collect (score, target) pairs — cohort data is small enough
+    pairs = df.select(score_col, target_col).collect()
+    data = [
+        (float(r[score_col]), int(r[target_col]))
+        for r in pairs
+        if r[score_col] is not None and r[target_col] is not None
+    ]
+
+    if len(data) < 10:
+        return None
+
+    n_bads = sum(1 for _, b in data if b == 1)
+    n_goods = sum(1 for _, b in data if b == 0)
 
     if n_bads == 0 or n_goods == 0:
         return None
 
-    # Approximate AUC using mean rank method
-    from pyspark.sql import Window
-    w = Window.orderBy(F.col(score_col).asc())
-    ranked = df.withColumn("_rank", F.row_number().over(w))
+    # Sort by score ascending, assign ranks (1-based)
+    data.sort(key=lambda x: x[0])
+    bad_rank_sum = sum(i + 1 for i, (_, b) in enumerate(data) if b == 1)
 
-    bad_rank_sum = (
-        ranked.filter(F.col(target_col) == 1)
-        .agg(F.sum("_rank").alias("s"))
-        .collect()[0]["s"]
-    )
-
-    if bad_rank_sum is None:
-        return None
-
-    auc = (float(bad_rank_sum) - n_bads * (n_bads + 1) / 2) / (n_bads * n_goods)
+    auc = (bad_rank_sum - n_bads * (n_bads + 1) / 2) / (n_bads * n_goods)
     gini = 2 * auc - 1
     return round(gini, 6)
 
@@ -138,9 +252,21 @@ def _compute_odds(
     """Compute goods/bads odds by score decile."""
     bin_col = "score_decile_static"
     if bin_col not in df.columns:
-        from pyspark.sql import Window
-        w = Window.orderBy(score_col)
-        df = df.withColumn(bin_col, F.ntile(10).over(w))
+        # Assign deciles in Python to avoid unpartitioned Window.
+        # Collect (score, all_cols) is too heavy — instead, use approxQuantile
+        # to derive 9 edges, then bucket via CASE WHEN (no Window needed).
+        clean = df.filter(F.col(score_col).isNotNull())
+        edges = clean.stat.approxQuantile(score_col, [i / 10 for i in range(1, 10)], 0.01)
+        edges = sorted(set(edges))  # deduplicate
+
+        if edges:
+            # Build CASE expression for bin assignment
+            expr = F.lit(len(edges) + 1)  # default: last bin
+            for i in range(len(edges)):
+                expr = F.when(F.col(score_col) <= edges[i], F.lit(i + 1)).otherwise(expr)
+            df = df.withColumn(bin_col, expr)
+        else:
+            df = df.withColumn(bin_col, F.lit(1))
 
     rows = (
         df.groupBy(bin_col)

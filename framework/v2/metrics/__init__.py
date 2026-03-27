@@ -21,11 +21,16 @@ from __future__ import annotations
 #   config → attribution → schemas → metrics/__init__ → stability → config
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
-    "compute_stability":   ("framework.v2.metrics.stability_metrics",  "compute_stability"),
-    "compute_data_quality": ("framework.v2.metrics.stability_metrics", "compute_data_quality"),
-    "compute_performance": ("framework.v2.metrics.performance_metrics", "compute_performance"),
-    "compute_separation":  ("framework.v2.metrics.separation_metrics",  "compute_separation"),
-    "compute_calibration": ("framework.v2.metrics.calibration_metrics", "compute_calibration"),
+    "compute_stability":        ("framework.v2.metrics.stability_metrics",   "compute_stability"),
+    "compute_data_quality":     ("framework.v2.metrics.stability_metrics",   "compute_data_quality"),
+    "compute_performance":      ("framework.v2.metrics.performance_metrics", "compute_performance"),
+    "compute_separation":       ("framework.v2.metrics.separation_metrics",  "compute_separation"),
+    "compute_calibration":      ("framework.v2.metrics.calibration_metrics", "compute_calibration"),
+    "compute_psi_table":        ("framework.v2.metrics.stability_metrics",   "compute_psi_table"),
+    "compute_csi_table":        ("framework.v2.metrics.stability_metrics",   "compute_csi_table"),
+    "compute_edr_rank_ordering":  ("framework.v2.metrics.performance_metrics", "compute_edr_rank_ordering"),
+    "compute_edr_capture_summary": ("framework.v2.metrics.performance_metrics", "compute_edr_capture_summary"),
+    "compute_ks_table":         ("framework.v2.metrics.separation_metrics",  "compute_ks_table"),
 }
 
 __all__ = list(_LAZY_IMPORTS.keys())

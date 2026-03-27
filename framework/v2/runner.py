@@ -203,7 +203,6 @@ def run_monitoring(
 
         # Performance
         perf = v2_metrics.compute_performance(cohorts, config, thresholds, sc_id)
-        result.performance[sc_id] = perf
 
         # Calibration: M12 (target window) ONLY
         calib_results = {}
@@ -213,6 +212,49 @@ def run_monitoring(
             if calib is not None:
                 calib_results["M12"] = calib
         result.calibration[sc_id] = calib_results
+
+        # ── Detailed tables for MMR ──────────────────────────────────
+        from framework.v2.metrics.stability_metrics import compute_psi_table, compute_csi_table
+        from framework.v2.metrics.performance_metrics import compute_edr_rank_ordering, compute_edr_capture_summary
+        from framework.v2.metrics.separation_metrics import compute_ks_table
+
+        # PSI bucket table
+        psi_table = compute_psi_table(
+            sc_df, sc_baseline, config.score_col, config.score_intervals,
+        )
+        if sc_id not in result.stability:
+            result.stability[sc_id] = {}
+        result.stability[sc_id]["psi_table"] = psi_table
+
+        # CSI tables per feature
+        csi_tables = {}
+        for feat in config.feature_cols:
+            csi = compute_csi_table(sc_df, sc_baseline, feat, config.psi_n_bins)
+            csi_tables[feat] = csi
+        result.stability[sc_id]["csi_tables"] = csi_tables
+
+        # EDR rank ordering + capture per maturity window
+        edr_details = {}
+        for label, cohort in cohorts.items():
+            rank_table = compute_edr_rank_ordering(cohort, config, config.score_intervals)
+            capture = compute_edr_capture_summary(cohort, config, config.risk_threshold)
+            edr_details[label] = {
+                "rank_ordering": rank_table,
+                "capture_summary": capture,
+            }
+
+        result.performance[sc_id] = {
+            "summary": perf,
+            "edr_details": edr_details,
+        }
+
+        # KS table per maturity window
+        ks_tables = {}
+        for label, cohort in cohorts.items():
+            ks_tbl = compute_ks_table(cohort, config, config.ks_bins)
+            if ks_tbl is not None:
+                ks_tables[label] = ks_tbl
+        result.separation[sc_id]["ks_tables"] = ks_tables
 
     # 9. Explanation (optional)
     if config.explanation_enabled:
@@ -281,7 +323,10 @@ def _collect_governance_flags(result: MonitoringResult, thresholds: ThresholdEng
                     "source": "separation",
                 })
 
-    for sc_id, perf_rows in result.performance.items():
+    for sc_id, perf_data in result.performance.items():
+        perf_rows = perf_data.get("summary", perf_data) if isinstance(perf_data, dict) else perf_data
+        if not isinstance(perf_rows, list):
+            perf_rows = []
         for row in perf_rows:
             if row.get("edr_delta_status") in ("ALERT", "WARNING"):
                 flags.append({
