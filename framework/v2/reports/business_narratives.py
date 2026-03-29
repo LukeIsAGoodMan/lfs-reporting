@@ -59,7 +59,8 @@ def _business_observations(context) -> list[str]:
             )
 
     # Performance -> charge-off language
-    for sc_id, perf_rows in context.performance.items():
+    for sc_id, perf_data in context.performance.items():
+        perf_rows = perf_data.get("summary", perf_data) if isinstance(perf_data, dict) else perf_data
         if isinstance(perf_rows, list):
             for row in perf_rows:
                 if not isinstance(row, dict):

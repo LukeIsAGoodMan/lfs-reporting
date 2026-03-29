@@ -109,8 +109,13 @@ def _section_portfolio_summary(result, config: MonitoringConfig) -> str:
 
     # Channel breakdown from performance
     channel_rows = []
-    for sc_id, perf_rows in result.performance.items():
+    for sc_id, perf_data in result.performance.items():
+        perf_rows = perf_data.get("summary", perf_data) if isinstance(perf_data, dict) else perf_data
+        if not isinstance(perf_rows, list):
+            continue
         for row in perf_rows:
+            if not isinstance(row, dict):
+                continue
             channel = row.get("channel", "all")
             display_label = row.get("display_label") or row.get("maturity", "")
             edr = row.get("edr")
@@ -169,8 +174,13 @@ def _section_early_performance(result, config: MonitoringConfig) -> str:
     headers = ["Window", "Rate", "Status", "Note"]
     rows = []
 
-    for sc_id, perf_rows in result.performance.items():
+    for sc_id, perf_data in result.performance.items():
+        perf_rows = perf_data.get("summary", perf_data) if isinstance(perf_data, dict) else perf_data
+        if not isinstance(perf_rows, list):
+            continue
         for row in perf_rows:
+            if not isinstance(row, dict):
+                continue
             display_label = row.get("display_label") or row.get("maturity", "--")
             note = row.get("note")
             if note:

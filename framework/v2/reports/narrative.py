@@ -124,8 +124,14 @@ def _summarize_performance(result, config: MonitoringConfig) -> list[str]:
 
     _DISPLAY_LABELS = {"M3": "EDR30", "M6": "EDR60", "M9": "EDR90", "M12": "CO"}
 
-    for sc_id, perf_rows in result.performance.items():
+    for sc_id, perf_data in result.performance.items():
+        # Handle both legacy list and new {"summary": list, ...} format
+        perf_rows = perf_data.get("summary", perf_data) if isinstance(perf_data, dict) else perf_data
+        if not isinstance(perf_rows, list):
+            continue
         for row in perf_rows:
+            if not isinstance(row, dict):
+                continue
             # Only include the 'all' channel row to avoid duplication
             if row.get("channel") not in ("all", None):
                 continue
